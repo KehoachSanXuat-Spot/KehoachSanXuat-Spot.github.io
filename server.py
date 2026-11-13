@@ -325,7 +325,7 @@ import urllib.request as _ureq
 import urllib.parse as _uparse
 import urllib.error as _uerr
 
-PLAN_REPO = os.environ.get("PLAN_REPO", "").strip()
+PLAN_REPO = os.environ.get("PLAN_REPO", "").strip() or "KehoachSanXuat-Spot/dieu-do-data"
 PLAN_BRANCH = os.environ.get("PLAN_BRANCH", "main").strip() or "main"
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 USE_GITHUB = bool(CLOUD_MODE and PLAN_REPO and GITHUB_TOKEN)
@@ -555,6 +555,85 @@ def _plan_meta():
     if os.path.exists(fp):
         return {"exists": True, "mtime": os.path.getmtime(fp), "by": "", "sha": None}
     return {"exists": False, "mtime": 0.0, "by": "", "sha": None}
+
+
+# ============================================================
+# TỰ ĐỘNG SAO LƯU XOAY VÒNG 6 BẢN / GIỜ (Ring Buffer Backup)
+# Cứ mỗi 10 phút (slot 1..6 tương ứng phút 00-09, 10-19... trong giờ),
+# hệ thống tự động đọc file đang chạy (SharePoint / GitHub)
+# và lưu bản snapshot vào repo GitHub:
+#   backups/KeHoach_HanSpot_slot1.xlsx .. slot6.xlsx
+# Đến giờ tiếp theo sẽ tự động xoay vòng ghi đè lại vào slot 1..6.
+# ============================================================
+_last_backup_slot_key = None
+_last_backup_mtime = 0.0
+
+
+def _do_rolling_backup(force: bool = False):
+    """Kiểm tra và thực hiện sao lưu xoay vòng vào đúng slot (1..6) nếu có thay đổi."""
+    global _last_backup_slot_key, _last_backup_mtime
+    repo = PLAN_REPO or "KehoachSanXuat-Spot/dieu-do-data"
+    token = GITHUB_TOKEN
+    if not token or not repo:
+        return
+    import datetime as _dt
+    now = _dt.datetime.now()
+    slot = (now.minute // 10) + 1  # 1..6
+    slot_key = (now.year, now.month, now.day, now.hour, slot)
+
+    try:
+        content, mtime = _plan_read_bytes()
+    except Exception as e:
+        logger.warning("[Rolling Backup] Chua doc duoc file de sao luu: %s", e)
+        return
+
+    # Nếu không phải ép buộc và file chưa đổi mtime -> bỏ qua để tránh commit rác
+    if not force:
+        if slot_key == _last_backup_slot_key and mtime <= _last_backup_mtime:
+            return
+        if _last_backup_mtime > 0 and mtime <= _last_backup_mtime:
+            return
+
+    slot_filename = f"backups/KeHoach_HanSpot_slot{slot}.xlsx"
+    slot_q = _uparse.quote(slot_filename)
+
+    sha = None
+    try:
+        d = _gh_api("GET", f"/repos/{repo}/contents/{slot_q}?ref={_uparse.quote(PLAN_BRANCH)}")
+        sha = d.get("sha")
+    except Exception:
+        sha = None
+
+    body = {
+        "message": f"Auto backup slot {slot}/6 ({now.strftime('%H:%M %d/%m/%Y')})",
+        "content": _b64.b64encode(content).decode("ascii"),
+        "branch": PLAN_BRANCH,
+    }
+    if sha:
+        body["sha"] = sha
+
+    try:
+        _gh_api("PUT", f"/repos/{repo}/contents/{slot_q}", body)
+        _last_backup_slot_key = slot_key
+        _last_backup_mtime = mtime
+        logger.info("[Rolling Backup] Da sao luu thanh cong slot %d/6 vao %s (%s)", slot, slot_filename, repo)
+    except Exception as e:
+        logger.warning("[Rolling Backup] Loi luu slot %d vao GitHub: %s", slot, e)
+
+
+def _rolling_backup_worker():
+    """Luồng chạy ngầm: định kỳ mỗi 60 giây kiểm tra mốc 10 phút để sao lưu."""
+    time.sleep(30)
+    while True:
+        try:
+            _do_rolling_backup()
+        except Exception as e:
+            logger.warning("[Rolling Backup Worker] Loi: %s", e)
+        time.sleep(60)
+
+
+if GITHUB_TOKEN:
+    threading.Thread(target=_rolling_backup_worker, daemon=True).start()
 
 
 def _mutate_plan_workbook(user_email, mutate_fn, local_path=None):
@@ -790,6 +869,7 @@ def save_khsx_dong_endpoint(payload: SaveKHSXDongPayload, request: Request):
             safe_name, fp = _get_safe_excel_path(payload.filename or "KeHoach_HanSpot_Tuan_Thang_Mau.xlsx", must_exist=True)
             result = _mutate_plan_workbook(_req_email(request), _apply, local_path=fp)
         result["message"] = "Đã lưu thành công sheet KHSX_Dong vào %s" % result.get("filename", "")
+        threading.Thread(target=lambda: (time.sleep(2), _do_rolling_backup(force=True)), daemon=True).start()
         return result
     except HTTPException:
         raise
@@ -845,7 +925,9 @@ def save_actual_endpoint(payload: SaveActualPayload, request: Request):
                 av = 0
             clean.append({"part": str(pt), "actual": max(0, av)})
         try:
-            return _pa_save_actual(clean, _req_email(request))
+            res = _pa_save_actual(clean, _req_email(request))
+            threading.Thread(target=lambda: (time.sleep(2), _do_rolling_backup(force=True)), daemon=True).start()
+            return res
         except HTTPException:
             raise
         except Exception:
@@ -906,9 +988,12 @@ def save_actual_endpoint(payload: SaveActualPayload, request: Request):
 
     try:
         if USE_GITHUB:
-            return _mutate_plan_workbook(_req_email(request), _apply)
-        safe_name, fp = _get_safe_excel_path(payload.filename or "KeHoach_HanSpot_Tuan_Thang_Mau.xlsx", must_exist=True)
-        return _mutate_plan_workbook(_req_email(request), _apply, local_path=fp)
+            res = _mutate_plan_workbook(_req_email(request), _apply)
+        else:
+            safe_name, fp = _get_safe_excel_path(payload.filename or "KeHoach_HanSpot_Tuan_Thang_Mau.xlsx", must_exist=True)
+            res = _mutate_plan_workbook(_req_email(request), _apply, local_path=fp)
+        threading.Thread(target=lambda: (time.sleep(2), _do_rolling_backup(force=True)), daemon=True).start()
+        return res
     except HTTPException:
         raise
     except Exception:
