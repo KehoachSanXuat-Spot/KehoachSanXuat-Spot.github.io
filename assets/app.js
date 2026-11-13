@@ -3526,32 +3526,22 @@ function bindOrbit(canvas){
     orbit.py = e.clientY;
     orbit.drag = true;
 
-    // Phân loại nút chuột theo chuẩn Siemens NX:
-    // e.button: 0 = Trái (MB1), 1 = Giữa (MB2), 2 = Phải (MB3)
-    if(e.button === 1){
-      // Chuột giữa (MB2 - Chuẩn NX cốt lõi)
-      if(e.shiftKey){
-        orbit.dragMode = "pan";      // Shift + MB2 = Pan (Dời góc nhìn)
-      } else if(e.ctrlKey){
-        orbit.dragMode = "zoom";     // Ctrl + MB2 = Zoom
-      } else {
-        orbit.dragMode = "rotate";   // MB2 = Xoay 3D (Rotate/Orbit)
-      }
-    } else if(e.button === 2){
-      // Chuột phải (MB3): Pan dời khung nhìn
-      orbit.dragMode = "pan";
+    // Phân loại nút chuột theo chuẩn Onshape (cad.onshape.com):
+    // e.button: 0 = Trái, 1 = Giữa, 2 = Phải
+    if(e.button === 2){
+      // Chuột PHẢI = Xoay (Rotate/Orbit) — giống Onshape. Ctrl/Shift + Phải = Pan.
+      orbit.dragMode = (e.ctrlKey || e.shiftKey) ? "pan" : "rotate";
+    } else if(e.button === 1){
+      // Chuột GIỮA = Pan (dời khung nhìn). Ctrl + Giữa = Zoom.
+      orbit.dragMode = e.ctrlKey ? "zoom" : "pan";
     } else {
-      // Chuột trái (MB1):
-      if(e.shiftKey){
-        orbit.dragMode = "pan";
-      } else {
-        orbit.dragMode = "rotate";
-      }
+      // Chuột TRÁI = Xoay (tiện cho người dùng thường). Shift/Ctrl + Trái = Pan.
+      orbit.dragMode = (e.shiftKey || e.ctrlKey) ? "pan" : "rotate";
     }
 
     // Double click MB2 (hoặc MB1) -> Fit View toàn xưởng
     const now = performance.now();
-    if(now - lastClickTime < 280 && (e.button === 1 || e.button === 0)){
+    if(now - lastClickTime < 280 && (e.button === 1 || e.button === 0 || e.button === 2)){
       fitView3D();
       orbit.drag = false;
     }
@@ -3595,11 +3585,35 @@ function bindOrbit(canvas){
   window.addEventListener("pointerup", onPointerUp);
   window.addEventListener("pointercancel", onPointerUp);
 
-  // Lăn bánh xe chuột (Wheel) để Zoom mượt mà
+  // Lăn bánh xe chuột (Wheel) = Zoom VỀ PHÍA CON TRỎ (giống Onshape).
   canvas.addEventListener("wheel", e => {
     e.preventDefault();
     const factor = e.deltaY > 0 ? 1.08 : 0.92;
-    orbit.r = Math.max(12, Math.min(500, orbit.r * factor));
+    const newR = Math.max(12, Math.min(500, orbit.r * factor));
+    // Dời tâm nhìn về điểm dưới con trỏ: zoom-in kéo lại gần, zoom-out đẩy ra.
+    try{
+      if(camera && typeof THREE !== "undefined"){
+        camera.updateProjectionMatrix();   // đảm bảo ma trận hiện hành để unproject đúng
+        camera.updateMatrixWorld();
+        const rect = canvas.getBoundingClientRect();
+        const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        const ray = new THREE.Raycaster();
+        ray.setFromCamera({x: ndcX, y: ndcY}, camera);
+        const dy = ray.ray.direction.y;
+        if(Math.abs(dy) > 1e-5){
+          const t = -ray.ray.origin.y / dy;            // giao mặt phẳng sàn y=0
+          if(t > 0 && isFinite(t)){
+            const hx = ray.ray.origin.x + ray.ray.direction.x * t;
+            const hz = ray.ray.origin.z + ray.ray.direction.z * t;
+            const frac = (orbit.r - newR) / orbit.r;    // >0 khi zoom-in
+            orbit.cx += (hx - orbit.cx) * frac * 0.9;
+            orbit.cz += (hz - orbit.cz) * frac * 0.9;
+          }
+        }
+      }
+    }catch(err){ /* bỏ qua, vẫn zoom quanh tâm */ }
+    orbit.r = newR;
   }, {passive: false});
 }
 function resizeThree(){
