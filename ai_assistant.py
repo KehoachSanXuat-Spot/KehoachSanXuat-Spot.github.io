@@ -37,22 +37,30 @@ def safe_print(msg: str):
         except Exception:
             pass
 
-SYSTEM_PROMPT = """Bạn là Gemini AI - Giám Đốc Điều Hành Sản Xuất Thông Minh (AI Operations Copilot) của "Xưởng Hàn Spot Toàn Diện (Xuong_Spot_TD)".
-Xưởng của bạn là một tổ hợp sản xuất cơ khí tích hợp khép kín gồm:
+SYSTEM_PROMPT = """Bạn là Gemini AI - Trợ lý Điều Hành Sản Xuất Thông Minh (AI Operations Copilot) của "Xưởng Hàn Spot (ckthanhdat.vn)".
+Xưởng của bạn là tổ hợp sản xuất cơ khí tích hợp khép kín gồm:
 1. Khu Cắt Phôi Laser: Máy cắt tấm Laser (Laser-Tam-1..2), Máy cắt ống Laser (Laser-Ong-1..2).
 2. Khu Dập Định Hình: Các dòng máy dập 60T, 110T, 160T, 250T, 500T.
-3. Khu Hàn Spot: 25 máy hàn pedestal C-frame (L1-1..L3-7), súng hàn cầm tay treo balancer, máy hàn tán bu lông bu-loong Soyer.
+3. Khu Hàn Spot: 25 máy hàn pedestal C-frame (L1-1..L3-7), súng hàn cầm tay treo balancer, máy hàn tán bu-lông Soyer.
 4. Khu Hàn Robot MAG: 4 trạm robot hàn MAG tự động (Robot-MAG-1..4).
 5. Đội ngũ Công nhân: Thợ bậc 2, bậc 3, bậc 4 được phân công theo ca làm việc (HC, S1, S2, S6, S7, 24/7).
 
-Mục tiêu của bạn:
-- Giúp Quản đốc xưởng phân tích lịch điều độ, phát hiện điểm nghẽn (bottleneck), máy quá tải, máy nhàn rỗi.
-- Cảnh báo các đơn hàng/part có nguy cơ trễ hạn (late orders) và chỉ ra nguyên nhân cốt lõi.
-- Đề xuất các phương án tối ưu thực tế (chia nhỏ lô gối đầu - lot streaming, chuyển thợ bậc cao, san tải máy, tăng ca).
-- Trả lời bằng tiếng Việt ngắn gọn, súc tích, chuyên nghiệp, mang tính hành động cao (actionable insights).
-- ĐÁNH GIÁ ĐIỂM NGHẼN CHUẨN XÁC:
-  + Nếu máy bận nhất chỉ chiếm dưới 45% Makespan (hoặc đã được san tải về mức an toàn ~2.000 - 2.500 phút và đang chạy ca 24/7): BÁO CÁO RÕ RÀNG là "Dây chuyền hiện đã được san tải cân bằng rất tốt, tải trọng nằm trong ngưỡng an toàn. Không còn hiện tượng nghẽn tắc nghiêm trọng."
-  + Không dùng từ "quá tải nặng" khi máy chỉ bận ~30% Makespan. Chỉ coi là quá tải nặng khi tỷ lệ bận >= 65-70%.
+QUY TẮC PHẢN HỒI BẮT BUỘC (PHẢI TRẢ LỜI ĐÚNG TRỌNG TÂM CỦA QUẢN ĐỐC):
+1. TRẢ LỜI ĐÚNG VÀO NỘI DUNG ĐƯỢC HỎI, KHÔNG LAN MAN:
+   - Khi Quản đốc cảm ơn, chào hỏi, khen ngợi (ví dụ: "Cảm ơn bạn!", "Cảm ơn", "Chào bạn", "Tốt lắm", "Tuyệt vời", "OK cảm ơn"):
+     -> Chỉ đáp lại 1-2 câu ngắn gọn, thân thiện, lịch sự, chúc ca làm việc hiệu quả và luôn sẵn sàng hỗ trợ khi Quản đốc cần. TUYỆT ĐỐI KHÔNG tự động tuôn ra bài báo cáo số liệu xưởng khi Quản đốc không yêu cầu!
+   - Khi Quản đốc hỏi về một mã part hoặc máy móc cụ thể (ví dụ: "Máy L3-2 làm gì?", "Có part nào trễ không?"):
+     -> Trả lời đúng duy nhất trọng tâm câu hỏi đó, ngắn gọn, chính xác số liệu, không lặp lại cả báo cáo dài dòng.
+   - Khi Quản đốc bấm các nút phân tích nhanh ("Quét Điểm Nghẽn", "Dự Báo Trễ Hạn", "Tối Ưu Makespan", "Tư Vấn Công Nhân") hoặc hỏi "Báo cáo tổng quan tình hình xưởng":
+     -> Mới đưa ra bài báo cáo phân tích chi tiết, có cấu trúc rõ ràng với số liệu cụ thể.
+
+2. ĐÁNH GIÁ ĐIỂM NGHẼN CHUẨN XÁC:
+   - Nếu máy bận nhất chiếm dưới 45% Makespan (hoặc đã được san tải về mức an toàn ~2.000 - 2.500 phút và đang chạy ca 24/7): Báo cáo rõ là "Dây chuyền hiện đã được san tải cân bằng rất tốt, tải trọng nằm trong ngưỡng an toàn. Không còn hiện tượng nghẽn tắc nghiêm trọng."
+   - Không dùng từ "quá tải nặng" khi máy chỉ bận ~30% Makespan. Chỉ coi là quá tải nặng khi tỷ lệ bận >= 65-70%.
+
+3. KÍCH HOẠT HÀNH ĐỘNG HỆ THỐNG (ACTION BLOCKS):
+   - Khi Quản đốc yêu cầu thực hiện, áp dụng (ví dụ: "thực hiện phương án", "san tải", "đổi ca 24/7", "tái điều độ"):
+     -> Trả lời xác nhận ngắn gọn và LUÔN KÈM THEO khối lệnh ```action ở cuối để Quản đốc bấm Duyệt.
 
 === THỰC THI HÀNH ĐỘNG HỆ THỐNG & ĐIỀU ĐỘ (AI COPILOT ACTIONS) ===
 Khi Quản đốc yêu cầu THỰC HIỆN, ÁP DỤNG giải pháp (ví dụ: "thực hiện phương án đề xuất", "giải quyết điểm nghẽn", "san tải", "đổi ca 24/7", "tái điều độ", "ghi thực tế", "lưu kế hoạch động"), hãy:
@@ -261,6 +269,16 @@ def login_gemini_browser() -> Dict[str, Any]:
 
 def _rule_based_analysis(factory_context: Dict[str, Any], query: str = "") -> str:
     """Bộ phân tích quy tắc dự phòng — luôn trả lời bằng tiếng Việt chuyên nghiệp."""
+    q_lower = (query or "").lower().strip()
+
+    # 0. Nếu chỉ là lời cảm ơn / khen ngợi
+    if any(kw in q_lower for kw in ["cảm ơn", "cam on", "thank", "tốt lắm", "tot lam", "tuyệt vời", "tuyet voi"]) and len(q_lower.split()) <= 6:
+        return "Dạ không có gì ạ! Rất vui được đồng hành cùng Quản đốc. Chúc Quản đốc và toàn xưởng một ca sản xuất an toàn, thuận lợi và đạt năng suất cao nhất! Bất cứ lúc nào cần kiểm tra tiến độ hay san tải máy, Quản đốc cứ gọi tôi nhé! 🚀"
+
+    # 0. Nếu chỉ là lời chào hỏi xã giao
+    if any(kw in q_lower for kw in ["chào", "chao", "hi", "hello", "xin chào", "alo"]) and len(q_lower.split()) <= 4:
+        return "Xin chào Quản đốc! Tôi là Gemini AI Copilot của Xưởng Hàn Spot. Tôi đã sẵn sàng hỗ trợ Quản đốc quét điểm nghẽn, kiểm tra tiến độ giao hàng và tối ưu lịch xưởng. Quản đốc cần kiểm tra nội dung nào trước ạ?"
+
     machines = factory_context.get("machines", [])
     parts = factory_context.get("parts", [])
     makespan = factory_context.get("makespan", 0)
@@ -429,7 +447,18 @@ def query_gemini_brain(prompt: str, factory_context: Optional[Dict[str, Any]] = 
             context_json = json.dumps(slim_ctx, ensure_ascii=False, indent=2)
         context_str = "\n--- THÔNG TIN HIỆN TẠI CỦA XƯỞNG HÀN SPOT TOÀN DIỆN ---\n" + context_json + "\n----------------------------------------------------------\n"
 
-    user_text = f"{context_str}\nCâu hỏi từ Quản đốc xưởng: {prompt}\n\nHãy trả lời chi tiết, thực tế và đưa ra các con số/giải pháp cụ thể:"
+    q_clean = (prompt or "").strip().lower()
+    is_gratitude = any(w in q_clean for w in ["cảm ơn", "cam on", "thank", "tốt lắm", "tot lam", "tuyệt vời", "tuyet voi"]) and len(q_clean.split()) <= 6
+    is_greeting = any(w in q_clean for w in ["chào", "chao", "hi", "hello", "alo", "xin chào"]) and len(q_clean.split()) <= 4
+
+    if is_gratitude:
+        prompt_instruction = "Quản đốc đang gửi lời cảm ơn/khen ngợi. Hãy đáp lại thật lịch sự, ngắn gọn và nhiệt tình (1-2 câu). Tuyệt đối không lặp lại báo cáo số liệu xưởng khi không được hỏi."
+    elif is_greeting:
+        prompt_instruction = "Quản đốc đang chào hỏi. Hãy chào lại ngắn gọn, niềm nở (1-2 câu) và hỏi Quản đốc cần kiểm tra tiến độ hay điểm nghẽn nào hôm nay."
+    else:
+        prompt_instruction = "Hãy trả lời ĐÚNG TRỌNG TÂM câu hỏi của Quản đốc, súc tích, thực tế và mang tính hành động cao. Không lan man sang các chủ đề không được hỏi."
+
+    user_text = f"{context_str}\nCâu hỏi từ Quản đốc xưởng: {prompt}\n\n[HƯỚNG DẪN TRẢ LỜI]: {prompt_instruction}"
     full_prompt = f"{SYSTEM_PROMPT}\n{user_text}"
 
     # 1. Google Gemini API chính thức (khóa miễn phí từ AI Studio)
