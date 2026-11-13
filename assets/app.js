@@ -6185,6 +6185,11 @@ function generateClientSideAIResponse(prompt, ctx){
   const isWorker = /công nhân|cong nhan|thợ|tho|bậc|bac|phân công|tay nghề/.test(qLower);
   const isAction = /thực hiện|thuc hien|đồng ý|dong y|áp dụng|ap dung|kích hoạt|san tải ngay|triển khai|duyệt|duyet|ok|chạy đi/.test(qLower);
   const isGreeting = /^(chào|chao|hi|hello|xin chào|alo|helo)\b/.test(qLower.trim());
+  const isGratitude = /cảm ơn|cam on|thank|tốt lắm|tot lam|tuyệt vời|tuyet voi/.test(qLower.trim()) && qLower.trim().split(/\s+/).length <= 6;
+
+  if(isGratitude){
+    return "Dạ không có gì ạ! Rất vui được đồng hành cùng Quản đốc. Chúc Quản đốc và toàn xưởng một ca sản xuất an toàn, thuận lợi và đạt năng suất cao nhất! Bất cứ lúc nào cần kiểm tra tiến độ hay san tải máy, Quản đốc cứ gọi tôi nhé! 🚀";
+  }
 
   const sortedM = Object.entries(busyTimes).sort((a,b) => b[1] - a[1]);
   const maxBusyMin = sortedM.length ? sortedM[0][1] : 0;
