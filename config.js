@@ -23,8 +23,7 @@ window.APP_CONFIG = {
   // Máy chủ xử lý TẤT CẢ dữ liệu (đọc/ghi file kế hoạch, CP-SAT, Trợ lý AI,
   // xuất Excel). Mỗi lời gọi đều kèm ID token Microsoft 365; máy chủ tự xác
   // minh chữ ký + tên miền email trước khi phục vụ.
-  // Máy chủ hiện tại: Hugging Face Space. Muốn quay lại Render (dự phòng) chỉ cần
-  // đổi dòng dưới sang "https://kehoachsanxuat-spot-github-io.onrender.com"
-  // (CSP trong index.html đã cho phép cả hai).
-  solverApiBase: "https://ovcopenclaw-webapp.hf.space"
+  // Máy chủ hiện tại: RENDER. Muốn chuyển sang Hugging Face chỉ cần đổi dòng dưới
+  // sang "https://ovcopenclaw-webapp.hf.space" (CSP trong index.html đã cho phép cả hai).
+  solverApiBase: "https://kehoachsanxuat-spot-github-io.onrender.com"
 };
