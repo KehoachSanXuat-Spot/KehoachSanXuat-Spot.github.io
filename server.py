@@ -353,9 +353,18 @@ def _gh_api(method, path, body=None):
             "Content-Type": "application/json",
         },
     )
-    with _ureq.urlopen(req, timeout=30) as r:
-        raw = r.read()
-    return _json.loads(raw.decode("utf-8")) if raw else {}
+    try:
+        with _ureq.urlopen(req, timeout=30) as r:
+            raw = r.read()
+        return _json.loads(raw.decode("utf-8")) if raw else {}
+    except _uerr.HTTPError as e:
+        err_msg = ""
+        try:
+            err_msg = e.read().decode("utf-8", errors="ignore")
+        except Exception:
+            pass
+        logger.warning("GitHub API %s %s -> HTTP %s: %s", method, path, e.code, err_msg)
+        raise
 
 
 def _gh_file_q():
@@ -567,15 +576,58 @@ def _plan_meta():
 # ============================================================
 _last_backup_slot_key = None
 _last_backup_mtime = 0.0
+_working_backup_repo = None
+
+
+def _resolve_backup_repo():
+    """Tự động kiểm tra và chọn repo chính xác có quyền truy cập."""
+    global _working_backup_repo
+    if _working_backup_repo:
+        return _working_backup_repo
+    if not GITHUB_TOKEN:
+        return None
+
+    candidates = []
+    if PLAN_REPO:
+        candidates.append(PLAN_REPO)
+    try:
+        user_info = _gh_api("GET", "/user")
+        login = user_info.get("login")
+        if login:
+            candidates.append(f"{login}/dieu-do-data")
+    except Exception:
+        pass
+
+    candidates.extend(["dungbu-eng/dieu-do-data", "KehoachSanXuat-Spot/dieu-do-data"])
+
+    seen = set()
+    uniq = [c for c in candidates if c and not (c in seen or seen.add(c))]
+
+    for cand in uniq:
+        try:
+            r = _gh_api("GET", f"/repos/{cand}")
+            if r.get("id") or r.get("name"):
+                logger.info("[Rolling Backup] Da xac thuc thanh cong repo: %s", cand)
+                _working_backup_repo = cand
+                return cand
+        except _uerr.HTTPError:
+            continue
+        except Exception:
+            continue
+
+    logger.warning("[Rolling Backup] Khong truy cap duoc repo nao trong %s. Kiem tra quyen GITHUB_TOKEN.", uniq)
+    return PLAN_REPO or "dungbu-eng/dieu-do-data"
 
 
 def _do_rolling_backup(force: bool = False):
     """Kiểm tra và thực hiện sao lưu xoay vòng vào đúng slot (1..6) nếu có thay đổi."""
     global _last_backup_slot_key, _last_backup_mtime
-    repo = PLAN_REPO or "KehoachSanXuat-Spot/dieu-do-data"
-    token = GITHUB_TOKEN
-    if not token or not repo:
+    if not GITHUB_TOKEN:
         return
+    repo = _resolve_backup_repo()
+    if not repo:
+        return
+
     import datetime as _dt
     now = _dt.datetime.now()
     slot = (now.minute // 10) + 1  # 1..6
@@ -618,7 +670,7 @@ def _do_rolling_backup(force: bool = False):
         _last_backup_mtime = mtime
         logger.info("[Rolling Backup] Da sao luu thanh cong slot %d/6 vao %s (%s)", slot, slot_filename, repo)
     except Exception as e:
-        logger.warning("[Rolling Backup] Loi luu slot %d vao GitHub: %s", slot, e)
+        logger.warning("[Rolling Backup] Loi luu slot %d vao %s: %s", slot, repo, e)
 
 
 def _rolling_backup_worker():
