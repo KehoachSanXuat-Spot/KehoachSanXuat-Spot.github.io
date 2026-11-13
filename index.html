@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="vi">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://login.microsoftonline.com https://kehoachsanxuat-spot-github-io.onrender.com; frame-src https://login.microsoftonline.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self' https://login.microsoftonline.com">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<meta name="robots" content="noindex, nofollow">
+<title>Xưởng Hàn Spot · AI Gemini Copilot</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="icon" type="image/x-icon" href="./assets/Weld_CP-SAT.ico">
+<link rel="icon" type="image/png" sizes="256x256" href="./assets/Weld_CP-SAT.png">
+<link rel="apple-touch-icon" href="./assets/Weld_CP-SAT.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="./assets/app.css?v=d4672cccdc">
+
+<div id="authGate">
+  <div class="agcard">
+    <div class="aglogo">⚡</div>
+    <h1>XƯỞNG HÀN SPOT</h1>
+    <p>Đăng nhập bằng tài khoản Microsoft 365 của công ty để mở hệ thống điều độ.</p>
+    <button id="signInBtn">
+      <span>🔒</span>
+      <span>Đăng nhập Microsoft 365</span>
+    </button>
+    <div class="aghelp">Bắt buộc xác thực tài khoản tổ chức @ckthanhdat.vn</div>
+    <div class="agsocials">
+      <a href="https://facebook.com" target="_blank" rel="noopener" title="Facebook">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+      </a>
+      <a href="https://ckthanhdat.vn" target="_blank" rel="noopener" title="Trang chủ Thành Đạt">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+      </a>
+      <a href="https://github.com/KehoachSanXuat-Spot" target="_blank" rel="noopener" title="GitHub">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" clip-rule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
+      </a>
+    </div>
+    <div id="authWho"></div>
+    <div id="authErr" style="display:none"></div>
+    <div class="agfoot">© 2026 Xưởng Hàn Spot</div>
+  </div>
+</div>
+<style>
+#authGate{
+  position:fixed;inset:0;z-index:99999;
+  display:flex;align-items:center;justify-content:center;
+  background:#dcf2eb url("./assets/login-bg.jpg") no-repeat center center / cover;
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  padding:20px;box-sizing:border-box;
+}
+#authGate .agcard{
+  background:#ffffff;
+  border-radius:22px;
+  padding:36px 34px 28px;
+  max-width:390px;width:100%;
+  text-align:center;
+  box-shadow:0 24px 60px rgba(15,35,55,0.14), 0 4px 16px rgba(0,0,0,0.04);
+  border:1px solid rgba(255,255,255,0.8);
+  box-sizing:border-box;
+  animation:agFadeIn 0.4s ease-out;
+}
+@keyframes agFadeIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+#authGate .aglogo{font-size:38px;line-height:1;margin-bottom:10px;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.08))}
+#authGate h1{font-size:21px;font-weight:800;margin:0 0 4px;color:#0f2b48;letter-spacing:0.5px;text-transform:uppercase}
+#authGate .agsub{font-size:15px;font-weight:600;color:#334155;margin-bottom:14px}
+#authGate p{color:#475569;font-size:13.5px;line-height:1.55;margin:0 0 22px}
+#signInBtn{
+  background:#1d4ed8;color:#fff;border:none;border-radius:9px;
+  padding:13px 20px;font-size:14.5px;font-weight:600;cursor:pointer;width:100%;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  box-shadow:0 4px 14px rgba(29,78,216,0.32);
+  transition:all 0.2s ease;
+}
+#signInBtn:hover{background:#1e40af;transform:translateY(-1px);box-shadow:0 6px 18px rgba(29,78,216,0.4)}
+#signInBtn:active{transform:translateY(0)}
+#authGate .aghelp{font-size:11.5px;color:#64748b;margin-top:14px}
+#authGate .agsocials{display:flex;align-items:center;justify-content:center;gap:14px;margin-top:14px}
+#authGate .agsocials a{color:#64748b;display:inline-flex;align-items:center;justify-content:center;padding:4px;border-radius:50%;transition:color 0.15s ease}
+#authGate .agsocials a:hover{color:#1d4ed8}
+#authGate .agfoot{font-size:11px;color:#94a3b8;margin-top:18px}
+#authWho{color:#0284c7;font-size:12px;margin-top:12px;font-weight:600}
+#authErr{color:#ef4444;font-size:12.5px;margin-top:12px;white-space:pre-wrap;line-height:1.45;background:#fee2e2;border:1px solid #fca5a5;padding:8px 12px;border-radius:8px}
+</style>
+
+
+<div id="app">
+  <header>
+    <div class="brand">
+      <div class="spark"></div>
+      <div style="min-width:0">
+        <h1 style="color:#f43f5e;font-size:18px">⚡ XƯỞNG HÀN SPOT</h1>
+        <div class="sub">Tổ hợp Laser · Dập · Spot · MAG <span style="color:#ec4899;font-weight:700">· 🧠 AI Gemini Copilot</span></div>
+      </div>
+    </div>
+    <div class="hspace"></div>
+    <div id="userBadge" style="display:flex;align-items:center;gap:8px;font-size:12px;background:rgba(30,41,59,0.85);border:1px solid rgba(255,255,255,0.15);padding:4px 10px;border-radius:20px;">
+      <span style="color:#38bdf8">👤</span>
+      <span id="userAccountName" style="color:#e2e8f0;font-weight:600;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="Tài khoản công ty đã xác thực">--</span>
+      <button type="button" id="userSignOutBtn" style="background:#ef4444;border:none;color:#fff;border-radius:12px;padding:3px 8px;font-size:11px;cursor:pointer;font-weight:600" title="Đăng xuất khỏi hệ thống">Đăng xuất</button>
+    </div>
+    <button class="iconbtn" id="themeBtn" title="Đổi giao diện sáng/tối">◐</button>
+  </header>
+
+  <main>
+    <!-- ░░░ CỘT 1: DỮ LIỆU & RÀNG BUỘC ░░░ -->
+    <section class="col">
+      <div class="card">
+        <h2><span class="dot"></span>Dữ liệu đầu vào</h2>
+        <div class="dropzone" id="drop">
+          Kéo thả file <b>Excel (.xlsx)</b> vào đây<br><span class="note">hoặc bấm để chọn file</span>
+          <input type="file" id="file" accept=".xlsx,.xls,.csv" hidden>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn ghost" id="sampleBtn">Dùng dữ liệu mẫu</button>
+        </div>
+
+        <!-- Tự động đồng bộ file Excel khi lưu -->
+        <div id="autoWatchBox" style="margin-top:10px;padding:9px;background:var(--panel-2);border:1px solid var(--line);border-radius:9px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+            <span style="font-size:11px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;color:var(--muted)">🔄 Tự động đồng bộ khi Lưu Excel</span>
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:11px;user-select:none">
+              <input type="checkbox" id="autoWatchToggle" checked> Bật
+            </label>
+          </div>
+          <div style="display:flex;gap:6px">
+            <select id="autoWatchFile" style="padding:6px 8px;font-size:12px;flex:1">
+              <option value="">-- Đang quét file... --</option>
+            </select>
+            <button class="btn ghost" id="reloadExcelBtn" title="Nạp lại file ngay" style="padding:6px 10px;font-size:12px;flex:0 0 auto">↻</button>
+          </div>
+          <div id="watchStatus" style="font-size:11px;color:var(--faint);margin-top:6px;line-height:1.35">
+            Đang kết nối backend...
+          </div>
+        </div>
+
+        <!-- Chọn Sheet Kế hoạch (Tuần / Tháng) khi file Excel có nhiều sheet kế hoạch -->
+        <div id="planSheetBox" style="margin-top:10px;padding:8px 9px;background:var(--panel-2);border:1px solid var(--line);border-radius:9px;display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+            <span style="font-size:11px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;color:var(--muted)">📋 Chọn Kế hoạch SX</span>
+            <span id="planSheetBadge" style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--accent-soft);color:var(--accent)">1 sheet</span>
+          </div>
+          <select id="planSheetSelect" style="width:100%;padding:6px 8px;font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:6px;color:var(--fg);cursor:pointer">
+          </select>
+        </div>
+
+        <!-- Chọn Phân xưởng / Sheet DataSetting (Đã ẩn trong mô hình 1 Xưởng Toàn Diện) -->
+        <div id="dsSheetBox" style="display:none !important">
+          <select id="dsSheetSelect" style="display:none"></select>
+        </div>
+
+        <div class="summ" id="summ">
+          <div class="s"><b id="nMach">0</b><span>Máy</span></div>
+          <div class="s"><b id="nPart">0</b><span>Part</span></div>
+          <div class="s"><b id="nOp">0</b><span>Thao tác</span></div>
+          <div class="s" id="sPlan" style="display:none"><b id="nPlanQty">0</b><span>Kế hoạch</span></div>
+          <div class="s" id="sActual" style="display:none"><b id="nActualQty">0</b><span>Thực tế</span></div>
+        </div>
+        <div id="warn"></div>
+      </div>
+
+      <div class="card">
+        <h2><span class="dot"></span>Ràng buộc & mục tiêu</h2>
+        <div style="margin-bottom:10px;padding:8px 10px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px">
+            <span style="font-size:11px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;color:var(--muted)">⚡ Ca làm việc từng máy</span>
+            <span style="font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(34,197,94,0.15);color:var(--good);font-weight:600">Đã cài đặt</span>
+          </div>
+          <div style="font-size:11px;color:var(--good);line-height:1.4">Tự động nạp theo cột <b>Ca</b> trong sheet <b>May</b> (HC, S1, S2, 24/7...)</div>
+        </div>
+        <label class="field">
+          <span>Mục tiêu tối ưu</span>
+          <select id="objective">
+            <option value="makespan">Hoàn thành sớm nhất (makespan)</option>
+            <option value="balance">Cân bằng tải giữa các máy</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Thời gian đổi/gá đặt mỗi lần đổi part (setup)</span>
+          <input type="number" id="setup" value="0" min="0" step="1">
+        </label>
+        <label class="field">
+          <span style="display:flex;justify-content:space-between">
+            <span>Chia nhỏ lô gối đầu (Sub-lot)</span>
+            <span style="font-size:10px;color:var(--good);font-weight:600">Dàn đều sản lượng</span>
+          </span>
+          <select id="subLotSize">
+            <option value="500" selected>500 pcs / lô (Khuyên dùng)</option>
+            <option value="200">200 pcs / lô (Dòng chảy nhanh)</option>
+            <option value="1000">1,000 pcs / lô</option>
+            <option value="0">Không chia (Nguyên cả đơn)</option>
+          </select>
+        </label>
+
+        <!-- Khu hàng chờ bán thành phẩm (WIP) -->
+        <details style="margin-bottom:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:8px" id="wipConfig">
+          <summary style="cursor:pointer;font-weight:600;font-size:12px;color:#059669">📦 Khu hàng chờ bán thành phẩm (WIP)</summary>
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px">
+            <label class="field" style="margin:0">
+              <span>Sức chứa khu hàng chờ (tổng, pcs)</span>
+              <input type="number" id="wipStagingCap" value="5000" min="0" step="100">
+            </label>
+            <label class="field" style="margin:0">
+              <span>Tồn chờ tại mỗi máy – buffer (pcs)</span>
+              <input type="number" id="wipMachineBuffer" value="1000" min="0" step="50">
+            </label>
+            <label class="field" style="margin:0">
+              <span>Gọi hàng trước khi cần (lead, phút)</span>
+              <input type="number" id="wipLead" value="60" min="0" step="5">
+            </label>
+            <label class="field" style="margin:0">
+              <span>Giờ gốc t=0 (⟷ ngày đầu kế hoạch)</span>
+              <input type="datetime-local" id="wipAnchor" step="60">
+              <small style="color:var(--muted);font-size:9.5px">Trống = tự động (ngày đầu kế hoạch, 00:00 năm nay). Đặt để chạy theo thời gian thực.</small>
+            </label>
+            <div style="font-size:10.5px;color:var(--muted);line-height:1.5">Gọi hàng theo từng ca; không vượt sức chứa khu chờ. Mỗi máy giữ đúng buffer — hàn hết mới gọi lô tiếp (kéo/kanban). Mỗi đợt gọi có <b>giờ gọi muộn nhất = giờ cần hàng − lead</b>. Xem chi tiết ở tab <b style="color:#34d399">📦 Gọi hàng (WIP)</b>.</div>
+          </div>
+        </details>
+
+        <!-- Khai báo sự cố máy đột xuất -->
+        <details style="margin-bottom:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:8px">
+          <summary style="cursor:pointer;font-weight:600;font-size:12px;color:var(--hot)">⚠ Sự cố & Bảo trì máy đột xuất</summary>
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+            <div style="display:flex;gap:6px">
+              <select id="dtMach" style="padding:4px 6px;font-size:12px;flex:1"></select>
+              <input type="number" id="dtStart" placeholder="Từ phút" style="width:70px;padding:4px 6px;font-size:12px" min="0">
+              <input type="number" id="dtEnd" placeholder="Đến phút" style="width:70px;padding:4px 6px;font-size:12px" min="0">
+            </div>
+            <div style="display:flex;gap:6px">
+              <input type="text" id="dtReason" placeholder="Lý do (vd: Hỏng điện cực, thay ty ben...)" style="flex:1;padding:4px 6px;font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:6px;color:var(--fg)">
+              <button class="btn" id="addDtBtn" style="padding:4px 10px;font-size:12px;flex:0 0 auto">+ Thêm</button>
+            </div>
+            <div id="dtList" style="display:flex;flex-direction:column;gap:4px;max-height:85px;overflow:auto;font-size:11px"></div>
+          </div>
+        </details>
+
+        <div class="row" style="margin-top:6px;gap:8px">
+          <button class="btn ghost" id="solveBtn" style="flex:1" title="Giải ngay bằng Heuristic (nhanh)">⚡ Heuristic</button>
+          <button class="btn" id="solveCpsatBtn" style="flex:1;background:#1a9e6a" title="Giải tối ưu toàn cục qua Python OR-Tools">★ CP-SAT (Tối ưu)</button>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px;padding:4px 6px;background:var(--panel-2);border:1px solid var(--line);border-radius:5px;font-size:11.5px;color:var(--muted)">
+          <span>⏱ Thời gian giải:</span>
+          <select id="cpTimeLimit" style="padding:2px 6px;font-size:11px;background:var(--panel);border:1px solid var(--line);border-radius:4px;color:var(--fg);cursor:pointer">
+            <option value="15">15 giây (Nhanh)</option>
+            <option value="30" selected>30 giây (Chuẩn)</option>
+            <option value="60">60 giây (Kỹ)</option>
+            <option value="120">2 phút (Sâu)</option>
+            <option value="300">5 phút (Tối đa)</option>
+          </select>
+        </div>
+        <button class="btn" id="btnOpenKHSXDong" style="width:100%;margin-top:8px;background:linear-gradient(135deg, #1E3A8A, #2563EB);display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px;padding:8px 12px;border:1px solid #3b82f6" title="Xem bảng Kế hoạch Sản xuất Động theo Ngày">
+          <span>📋 Xem Kế hoạch Động (KHSX_Dong)</span>
+        </button>
+        <button class="btn" id="btnExportExcel" style="width:100%;margin-top:6px;background:linear-gradient(135deg, #065F46, #059669);display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px;padding:8px 12px;border:1px solid #10b981" title="Xuất lịch điều độ hiện tại ra Excel (phát xuống xưởng)">
+          <span>⬇ Xuất lịch Excel (phát xưởng)</span>
+        </button>
+        <div id="solverStatus" class="note" style="margin-top:9px;font-size:12px;line-height:1.4"></div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+          <h2 style="margin:0"><span class="dot"></span>Danh sách Part (<span id="pCount">0</span>)</h2>
+        </div>
+        <div style="margin-bottom:8px">
+          <input type="text" id="partSearch" placeholder="🔍 Tìm nhanh Part (vd: Part-A, Part-100)..." style="width:100%;box-sizing:border-box;padding:5px 8px;font-size:12px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;color:var(--fg)">
+        </div>
+        <div class="plist" id="plist" style="max-height:360px;overflow-y:auto"></div>
+        <div id="pPageInfo" style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;font-size:11px;color:var(--muted)"></div>
+      </div>
+    </section>
+
+    <!-- ░░░ CỘT 2: MÔ PHỎNG ░░░ -->
+    <section class="col">
+      <div class="card viz">
+        <div class="tabs">
+          <button class="tab active" data-pane="three">Mô phỏng 3D</button>
+          <button class="tab" data-pane="gantt">Lịch (Gantt)</button>
+          <button class="tab" data-pane="khsxDong" id="tabKHSXDong" style="border:1px solid #3b82f6;color:#60a5fa;font-weight:700">📋 Kế hoạch Động (KHSX_Dong)</button>
+          <button class="tab" data-pane="wip" id="tabWip" style="border:1px solid #10b981;color:#34d399;font-weight:700">📦 Gọi hàng (WIP)</button>
+          <button class="tab" data-pane="workers" id="tabWorkers" style="border:1px solid #8b5cf6;color:#a78bfa;font-weight:700">👨‍🏭 Phân công Công nhân</button>
+          <button class="tab" data-pane="ai" id="tabAI" style="border:1px solid #ec4899;color:#f472b6;font-weight:700">🧠 AI Điều Hành (Gemini)</button>
+        </div>
+        <div class="stage">
+          <div class="pane" id="pane-three">
+            <canvas id="three"></canvas>
+            <div class="legend3d">
+              <div><i style="background:var(--hot)"></i>Đang hàn</div>
+              <div><i style="background:var(--accent)"></i>Chờ việc</div>
+              <div><i style="background:var(--muted)"></i>Rảnh</div>
+            </div>
+            <div class="hint" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;background:rgba(15,23,42,0.92);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.15);padding:6px 12px;border-radius:8px;font-size:11px;color:#e2e8f0;pointer-events:auto;z-index:20">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span>🖱️ Giữ Chuột Giữa = Xoay · Shift + Chuột Giữa / Chuột Phải = Pan · Lăn = Zoom</span>
+                <button type="button" class="btn" onclick="fitView3D()" style="padding:2px 8px;font-size:11px;background:#3b82f6;color:#fff;border-radius:4px;cursor:pointer;border:none;font-weight:600">🎯 Fit View</button>
+              </div>
+              <div style="display:flex;align-items:center;gap:4px">
+                <span style="color:#94a3b8;font-size:11px;font-weight:600">🎥 Góc nhìn:</span>
+                <button type="button" class="btn" onclick="setCameraPreset('overview')" style="padding:2px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer" title="Toàn cảnh nhà xưởng">🌐 Toàn cảnh</button>
+                <button type="button" class="btn" onclick="setCameraPreset('topdown')" style="padding:2px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer" title="Nhìn vuông góc từ trên xuống">📐 Mặt bằng</button>
+                <button type="button" class="btn" onclick="setCameraPreset('l1')" style="padding:2px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer" title="Cụm máy hàn bu lông L1">⚡ Cụm L1</button>
+                <button type="button" class="btn" onclick="setCameraPreset('l2')" style="padding:2px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer" title="Cụm súng hàn treo L2">🔧 Cụm L2</button>
+                <button type="button" class="btn" onclick="setCameraPreset('l3')" style="padding:2px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer" title="Cụm máy hàn C-frame L3">🏗 Cụm L3</button>
+                <button type="button" class="btn" onclick="setCameraPreset('worker')" style="padding:2px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer" title="Góc nhìn ngang tầm mắt công nhân">👤 Tầm mắt</button>
+              </div>
+            </div>
+          </div>
+          <div class="pane" id="pane-gantt" hidden style="position:relative">
+            <canvas id="gantt"></canvas>
+            <div id="ganttTooltip" style="position:absolute;display:none;pointer-events:none;background:rgba(15,23,42,0.96);border:1px solid #3b82f6;color:#f8fafc;padding:8px 11px;border-radius:6px;font-size:11px;line-height:1.5;z-index:100;box-shadow:0 6px 16px rgba(0,0,0,0.6);backdrop-filter:blur(4px);min-width:200px"></div>
+            <div class="hint">Rê chuột tra cứu chi tiết từng thao tác · Vạch cam = thời điểm mô phỏng</div>
+          </div>
+          <div class="pane" id="pane-khsxDong" hidden style="padding:12px;overflow:auto;height:100%;box-sizing:border-box;background:var(--panel)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+              <div>
+                <h3 style="margin:0;font-size:13.5px;font-weight:700;display:flex;align-items:center;gap:6px">
+                  <span>📋 Kế hoạch Sản xuất Động theo Ngày (KHSX_Dong)</span>
+                </h3>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px">
+                  Tự động phân bổ số lượng chi tiết từng ngày dựa trên năng lực máy và mốc giao hàng
+                </div>
+              </div>
+              <div style="display:flex;gap:6px">
+                <button class="btn ghost" id="btnExportKHSXDong" style="padding:5px 10px;font-size:11px;display:flex;align-items:center;gap:4px">
+                  <span>📥 Tải Excel (KHSX_Dong)</span>
+                </button>
+                <button class="btn" id="btnSaveKHSXDongToExcel" style="padding:5px 10px;font-size:11px;background:#1a9e6a;display:flex;align-items:center;gap:4px">
+                  <span>💾 Lưu vào File Excel gốc</span>
+                </button>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;font-size:11px;color:var(--muted);flex-wrap:wrap">
+              <span>✏️ Sửa trực tiếp cột <b style="color:var(--fg)">Thực tế</b> ngay trong bảng → tự lưu vào Excel gốc.</span>
+              <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap">
+                <input type="checkbox" id="khsxAutoSolve" checked style="margin:0">
+                <span>🔄 Tự giải lại lịch sau khi sửa</span>
+              </label>
+              <span id="khsxSaveStatus" style="font-weight:600"></span>
+            </div>
+
+            <!-- Thanh Tìm kiếm, Lọc & Sắp xếp KHSX_Dong -->
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;padding:6px 10px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;flex-wrap:wrap">
+              <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:260px">
+                <input type="text" id="khsxSearchInput" placeholder="🔍 Tìm kiếm Part (vd: Part-01, 07)..." style="flex:1;min-width:160px;padding:5px 8px;font-size:11.5px;background:var(--panel);border:1px solid var(--line);border-radius:5px;color:var(--fg)">
+                <select id="khsxZoneFilter" style="padding:5px 6px;font-size:11.5px;background:var(--panel);border:1px solid #3b82f6;border-radius:5px;color:var(--fg);cursor:pointer;font-weight:600">
+                  <option value="all">🏭 Tất cả phân xưởng (Thành phẩm)</option>
+                </select>
+                <select id="khsxPriorityFilter" style="padding:5px 6px;font-size:11.5px;background:var(--panel);border:1px solid var(--line);border-radius:5px;color:var(--fg);cursor:pointer">
+                  <option value="all">Tất cả ưu tiên</option>
+                  <option value="1">P1 · Gấp</option>
+                  <option value="2">P2 · Tiêu chuẩn</option>
+                  <option value="3">P3 · Thấp</option>
+                </select>
+                <select id="khsxStatusFilter" style="padding:5px 6px;font-size:11.5px;background:var(--panel);border:1px solid var(--line);border-radius:5px;color:var(--fg);cursor:pointer">
+                  <option value="all">Tất cả trạng thái</option>
+                  <option value="active">Chỉ Part có sản lượng</option>
+                  <option value="pending">Còn lại cần SX > 0</option>
+                </select>
+              </div>
+              <div style="font-size:11px;color:var(--muted);white-space:nowrap" id="khsxFilterCount">
+                Hiển thị <b>0</b> Part
+              </div>
+            </div>
+            <div id="khsxDongTableWrap" style="overflow-x:auto;border:1px solid var(--line);border-radius:8px"></div>
+          </div>
+          <div class="pane" id="pane-wip" hidden style="padding:12px;overflow:auto;height:100%;box-sizing:border-box;background:var(--panel)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+              <div>
+                <h3 style="margin:0;font-size:13.5px;font-weight:700;display:flex;align-items:center;gap:6px">
+                  <span>📦 Kế hoạch Gọi hàng Bán thành phẩm (WIP / Vị trí chờ)</span>
+                </h3>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px">
+                  Gọi hàng theo ca, không vượt sức chứa khu chờ; mỗi máy giữ buffer hợp lý, hàn hết mới gọi lô kế tiếp
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <select id="wipZoneFilter" style="padding:5px 8px;font-size:11.5px;background:var(--panel-2);border:1px solid #10b981;border-radius:6px;color:var(--fg);cursor:pointer;font-weight:600">
+                  <option value="all">🏭 Tất cả Phân xưởng & Kho BTP</option>
+                </select>
+                <button class="btn" id="btnExportWip" style="padding:5px 10px;font-size:11px;background:#059669;display:flex;align-items:center;gap:4px">
+                  <span>📥 Tải Excel (Gọi hàng WIP)</span>
+                </button>
+              </div>
+            </div>
+            <div id="wipNowBar" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:var(--panel-2);border:1px solid var(--line);border-left:3px solid #dc2626;border-radius:8px;padding:7px 10px;margin-bottom:10px;font-size:11.5px">
+              <span style="font-weight:700;color:#dc2626">🕐 Thời gian thực</span>
+              <span id="wipNowClock" class="mono" style="font-weight:700">—</span>
+              <span style="color:var(--muted)">·</span>
+              <span style="color:var(--muted)">Giờ gốc t=0: <b id="wipAnchorLbl" class="mono" style="color:var(--fg)">—</b></span>
+              <span style="color:var(--muted)">·</span>
+              <span style="color:var(--muted)">Lead gọi: <b id="wipLeadLbl" style="color:var(--fg)">60p</b></span>
+            </div>
+            <div id="wipContent"></div>
+          </div>
+          <div class="pane" id="pane-workers" hidden style="padding:12px;overflow:auto;height:100%;box-sizing:border-box;background:var(--panel)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+              <div>
+                <h3 style="margin:0;font-size:13.5px;font-weight:700;display:flex;align-items:center;gap:6px">
+                  <span>👨‍🏭 Phân công Công nhân & Năng suất (Dual-Resource DRC)</span>
+                </h3>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px">
+                  Tối ưu hóa nguồn lực con người, điều phối theo bậc thợ, hiệu suất cá nhân và lịch trình không trùng lặp
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <select id="workerZoneFilter" style="padding:5px 8px;font-size:11.5px;background:var(--panel-2);border:1px solid #8b5cf6;border-radius:6px;color:var(--fg);cursor:pointer;font-weight:600">
+                  <option value="all">🏭 Tất cả Phân xưởng</option>
+                </select>
+                <select id="workerShiftFilter" style="padding:5px 8px;font-size:11.5px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;color:var(--fg);cursor:pointer">
+                  <option value="all">🕒 Tất cả Ca làm việc</option>
+                  <option value="HC">Ca Hành chính (HC)</option>
+                  <option value="S1, S2">2 Ca (S1, S2)</option>
+                  <option value="S6, S7">2 Ca (S6, S7)</option>
+                  <option value="24/7">Chạy liên tục (24/7)</option>
+                </select>
+                <select id="workerSkillFilter" style="padding:5px 8px;font-size:11.5px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;color:var(--fg);cursor:pointer">
+                  <option value="all">⭐ Tất cả Bậc thợ</option>
+                  <option value="Bậc 4">Bậc 4 (Chuyên gia/Tổ trưởng)</option>
+                  <option value="Bậc 3">Bậc 3 (Tay nghề cao)</option>
+                  <option value="Bậc 2">Bậc 2 (Tiêu chuẩn)</option>
+                  <option value="Bậc 1">Bậc 1 (Mới/Học việc)</option>
+                </select>
+                <input id="workerSearch" type="text" placeholder="🔍 Tìm công nhân / máy..." style="padding:5px 8px;font-size:11.5px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;color:var(--fg);width:150px">
+                <button class="btn" id="btnExportWorkers" style="padding:5px 10px;font-size:11px;background:#7c3aed;color:#fff;display:flex;align-items:center;gap:4px">
+                  <span>📥 Tải Excel (Phân công)</span>
+                </button>
+              </div>
+            </div>
+            <div id="workerContent"></div>
+          </div>
+          <div class="pane" id="pane-ai" hidden style="display:flex;flex-direction:column;height:100%;box-sizing:border-box;background:var(--panel);overflow:hidden">
+            <!-- Header của AI Copilot -->
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--panel-2);border-bottom:1px solid var(--line);flex-wrap:wrap;gap:8px">
+              <div style="display:flex;align-items:center;gap:10px">
+                <span style="font-size:22px">🧠</span>
+                <div>
+                  <h3 style="margin:0;font-size:14px;font-weight:700;color:#f43f5e;display:flex;align-items:center;gap:6px">
+                    <span>AI Operations Copilot · Bộ Não Gemini</span>
+                    <span id="aiModelBadge" style="font-size:10px;padding:2px 7px;border-radius:4px;background:#ec4899;color:#fff;font-weight:700">…</span>
+                  </h3>
+                  <div id="aiStatusText" style="font-size:11px;color:var(--muted);margin-top:2px">
+                    Đang kiểm tra kết nối Trợ lý AI...
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px">
+                <button type="button" class="btn ghost" id="btnAILogin" onclick="loginGeminiBrain()" style="padding:5px 10px;font-size:11.5px;display:flex;align-items:center;gap:5px;border-color:#ec4899;color:#f43f5e">
+                  <span>🔑 Đăng nhập / Kết nối Gemini</span>
+                </button>
+                <button type="button" class="btn ghost" id="btnAIClear" onclick="clearAIChat()" style="padding:5px 8px;font-size:11.5px">
+                  <span>🗑 Xóa chat</span>
+                </button>
+                <select id="aiAutoCheck" onchange="setAutoCheckInterval(this.value)" title="AI tự động rà soát toàn bộ lịch theo chu kỳ (chỉ khi app đang mở)" style="padding:5px 8px;font-size:11.5px;background:var(--panel-2);color:var(--fg);border:1px solid var(--line);border-radius:6px;cursor:pointer">
+                  <option value="0">⏱ Tự kiểm tra: Tắt</option>
+                  <option value="15">⏱ Mỗi 15 phút</option>
+                  <option value="30">⏱ Mỗi 30 phút</option>
+                  <option value="60">⏱ Mỗi 1 giờ</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- 4 Thẻ Phân Tích Thông Minh Một Chạm -->
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(180px, 1fr));gap:8px;padding:10px 14px;background:var(--panel);border-bottom:1px solid var(--line)">
+              <button type="button" class="btn ghost" onclick="runAIQuickAction('bottlenecks')" style="text-align:left;padding:8px 10px;display:flex;align-items:center;gap:8px;border-left:3px solid #f97316;cursor:pointer">
+                <span style="font-size:18px">🔍</span>
+                <div>
+                  <div style="font-weight:700;font-size:11.5px;color:var(--fg)">Quét Điểm Nghẽn</div>
+                  <div style="font-size:10px;color:var(--muted)">Máy quá tải, san tải máy</div>
+                </div>
+              </button>
+              <button type="button" class="btn ghost" onclick="runAIQuickAction('late_risks')" style="text-align:left;padding:8px 10px;display:flex;align-items:center;gap:8px;border-left:3px solid #ef4444;cursor:pointer">
+                <span style="font-size:18px">⚠️</span>
+                <div>
+                  <div style="font-weight:700;font-size:11.5px;color:var(--fg)">Dự Báo Trễ Hạn</div>
+                  <div style="font-size:10px;color:var(--muted)">Part trễ, tính số giờ trễ</div>
+                </div>
+              </button>
+              <button type="button" class="btn ghost" onclick="runAIQuickAction('optimize_makespan')" style="text-align:left;padding:8px 10px;display:flex;align-items:center;gap:8px;border-left:3px solid #10b981;cursor:pointer">
+                <span style="font-size:18px">⚡</span>
+                <div>
+                  <div style="font-weight:700;font-size:11.5px;color:var(--fg)">Tối Ưu Makespan</div>
+                  <div style="font-size:10px;color:var(--muted)">Chia lô gối đầu, tăng ca</div>
+                </div>
+              </button>
+              <button type="button" class="btn ghost" onclick="runAIQuickAction('workers_advisory')" style="text-align:left;padding:8px 10px;display:flex;align-items:center;gap:8px;border-left:3px solid #8b5cf6;cursor:pointer">
+                <span style="font-size:18px">👨‍🏭</span>
+                <div>
+                  <div style="font-weight:700;font-size:11.5px;color:var(--fg)">Tư Vấn Công Nhân</div>
+                  <div style="font-size:10px;color:var(--muted)">Phân công bậc 2, 3, 4</div>
+                </div>
+              </button>
+            </div>
+
+            <!-- Khung Cuộn Tin Nhắn Chat -->
+            <div id="aiChatLog" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px;background:var(--panel-2)">
+              <!-- Tin nhắn được thêm động qua JS -->
+            </div>
+
+            <!-- Thanh Nhập Tin Nhắn Chat -->
+            <div style="padding:10px 14px;background:var(--panel);border-top:1px solid var(--line);display:flex;gap:8px;align-items:center">
+              <input type="text" id="aiChatInput" placeholder="💬 Hỏi AI Gemini về máy móc, kế hoạch, tiến độ xưởng..." style="flex:1;padding:8px 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);color:var(--fg);font-size:13px">
+              <button type="button" class="btn" id="btnAISend" onclick="sendAIChat()" style="padding:8px 16px;background:linear-gradient(135deg, #ec4899, #f43f5e);color:#fff;font-weight:700;border-radius:8px;white-space:nowrap;cursor:pointer">
+                <span>Gửi 🚀</span>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="transport">
+          <button class="play" id="playBtn">▶</button>
+          <div class="clock mono" style="min-width:140px">t=<b id="tNow">0</b>p (<span id="tClock" style="color:var(--accent)">08:00</span>) / <span id="tEnd">0</span>p</div>
+          <input type="range" class="scrub" id="scrub" min="0" max="1000" value="0">
+          <div class="speed"><span>Tốc độ</span>
+            <select id="speed">
+              <option value="live">⏱ Giờ thực (1:1)</option>
+              <option value="0.5">0.5× (demo)</option>
+              <option value="1" selected>1× (demo)</option>
+              <option value="2">2×</option><option value="4">4×</option><option value="8">8×</option>
+              <option value="30">30× (1p/2s)</option><option value="60">60× (1p/1s)</option>
+            </select>
+          </div>
+          <button class="btn ghost" id="rescheduleBtn" title="Đóng băng phần đã xong trước t, tự động lập lại lịch cho phần còn lại" style="font-size:11px;padding:6px 10px;white-space:nowrap;color:var(--hot);border-color:var(--hot)">🔄 Tái điều độ</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ░░░ CỘT 3: SẢN LƯỢNG THỜI GIAN THỰC ░░░ -->
+    <section class="col">
+      <div class="card">
+        <h2><span class="dot"></span>Tổng quan</h2>
+        <div class="kpis" style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+          <div class="kpi accent"><div class="v mono" id="kMake">0</div><div class="k">Makespan</div></div>
+          <div class="kpi good"><div class="v mono" id="kDone">0/0</div><div class="k">Hoàn thành (thực tế)</div></div>
+          <div class="kpi hot"><div class="v mono" id="kActive">0</div><div class="k">Đang hàn</div></div>
+          <div class="kpi"><div class="v mono" id="kTardy" style="color:var(--good)">0</div><div class="k">Trễ hạn</div></div>
+          <div class="kpi" style="grid-column:span 2"><div class="v mono" id="kUtil">0%</div><div class="k">Hiệu suất toàn xưởng</div></div>
+        </div>
+        <div class="progwrap"><div class="progbar" id="prog"></div></div>
+      </div>
+
+      <div class="card">
+        <h2><span class="dot"></span>Sản lượng theo thời gian</h2>
+        <div id="chartInfo" style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;background:var(--panel-2);border:1px solid var(--line);border-radius:6px;margin-bottom:6px;font-size:10.5px">
+          <span>⏱ Thời điểm: <b id="chartTime" style="color:var(--hot)">06-Nov 08:00</b></span>
+          <span>🎯 Kế hoạch đến thời điểm: <b id="chartPcs" style="color:var(--accent)">0 / 0 pcs</b></span>
+        </div>
+        <canvas id="outchart" style="width:100%;height:150px;display:block;cursor:crosshair"></canvas>
+        <div class="note" id="chartSubNote">Kế hoạch sản lượng tích luỹ theo ngày & giờ (đã gồm lượng thực tế làm nền, lên tới tổng kế hoạch). Rê chuột để tra cứu.</div>
+      </div>
+
+      <div class="card">
+        <h2><span class="dot"></span>Sản lượng từng máy</h2>
+        <div class="mach-list" id="machList"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>Bộ lập lịch heuristic client-side · để lấy lịch tối ưu dùng mô hình OR-Tools CP-SAT (file Python kèm theo)</footer>
+</div>
+
+<script>window.APP_BUILD_ID="d4672cccdc";</script>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.10.0/lib/msal-browser.min.js" integrity="sha384-yXVL3cgcbuPa1TOmTYdr5MVOeFWnnXoYXcSIPBJ4lrnGHn8EZrbyurhG/xZMygBB" crossorigin="anonymous"></script>
+<script src="./config.js?v=d4672cccdc"></script>
+<script src="./auth.js?v=d4672cccdc"></script>
+<script src="./api-shim.js?v=d4672cccdc"></script>
+<script src="./gate.js?v=d4672cccdc"></script>

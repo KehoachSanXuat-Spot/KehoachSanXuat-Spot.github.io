@@ -1,0 +1,9 @@
+# Thu vien cho MAY CHU CLOUD (Render): CP-SAT + Tro ly AI + xuat Excel.
+# Ban chay tai may ca nhan dung requirements.txt o thu muc goc.
+ortools>=9.8.3296
+fastapi>=0.110.0
+uvicorn>=0.28.0
+pydantic>=2.6.0
+openpyxl>=3.1.2
+# Xac minh ID token Microsoft 365 (chu ky RS256)
+PyJWT[crypto]>=2.8.0
