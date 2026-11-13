@@ -412,8 +412,133 @@ def _gh_put(content_bytes, user_email, sha):
     return _gh_meta(force=True)
 
 
+# ============================================================
+# KHO LƯU QUA POWER AUTOMATE (cloud): đồng bộ 2 chiều với file Excel
+# trên SharePoint mà KHÔNG cần admin consent — flow chạy bằng kết nối
+# SharePoint của chính người tạo flow (@ckthanhdat.vn).
+#   PA_FLOW_URL = URL HTTP của flow "When an HTTP request is received"
+#   PA_SECRET   = chuỗi bí mật backend gửi kèm để flow từ chối người lạ
+# Backend GỬI dữ liệu có cấu trúc (không ghi đè cả file) -> flow dùng
+# Office Scripts sửa đúng ô, giữ nguyên công thức/định dạng Excel.
+# Thứ tự ưu tiên kho: Power Automate > GitHub > đĩa.
+# ============================================================
+PA_FLOW_URL = os.environ.get("PA_FLOW_URL", "").strip()
+PA_SECRET = os.environ.get("PA_SECRET", "").strip()
+USE_POWER_AUTOMATE = bool(CLOUD_MODE and PA_FLOW_URL)
+
+_pa_lock = threading.Lock()
+_pa_meta_cache = {"at": 0.0, "exists": False, "mtime": 0.0, "by": ""}
+_PA_META_TTL = 8.0
+
+
+def _pa_parse_time(s) -> float:
+    """ISO 8601 (trường 'Modified' của SharePoint) -> epoch giây; 0.0 nếu lỗi."""
+    if not s:
+        return 0.0
+    import datetime as _dt
+    txt = str(s).strip().replace("Z", "+00:00")
+    try:
+        return _dt.datetime.fromisoformat(txt).timestamp()
+    except Exception:
+        pass
+    try:
+        return _dt.datetime.fromisoformat(txt[:19]).timestamp()
+    except Exception:
+        return 0.0
+
+
+def _pa_call(action: str, extra: dict = None, timeout: int = 60) -> dict:
+    """Gọi flow Power Automate (POST JSON). Trả dict JSON; ném lỗi nếu ok=false."""
+    if not PA_FLOW_URL:
+        raise RuntimeError("PA_FLOW_URL chưa cấu hình")
+    body = {"secret": PA_SECRET, "action": action, "file": PLAN_FILE_NAME}
+    if extra:
+        body.update(extra)
+    req = _ureq.Request(
+        PA_FLOW_URL,
+        data=_json.dumps(body).encode("utf-8"),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    with _ureq.urlopen(req, timeout=timeout) as r:
+        raw = r.read()
+    data = _json.loads(raw.decode("utf-8")) if raw else {}
+    if isinstance(data, dict) and data.get("ok") is False:
+        raise RuntimeError("Power Automate: " + str(data.get("error") or "lỗi không rõ"))
+    return data if isinstance(data, dict) else {}
+
+
+def _pa_get_file():
+    """(bytes, mtime) của file kế hoạch lấy qua Power Automate."""
+    d = _pa_call("read")
+    content = _b64.b64decode(d.get("content") or "")
+    # Chịu được trường hợp flow mã hoá base64 2 lần (tuỳ biểu thức người dùng đặt):
+    # file .xlsx luôn bắt đầu bằng chữ ký ZIP 'PK'.
+    if content[:2] != b"PK":
+        try:
+            again = _b64.b64decode(content)
+            if again[:2] == b"PK":
+                content = again
+        except Exception:
+            pass
+    return content, _pa_parse_time(d.get("mtime") or d.get("Modified") or "")
+
+
+def _pa_meta(force=False):
+    now = time.time()
+    with _pa_lock:
+        if not force and _pa_meta_cache["at"] and now - _pa_meta_cache["at"] < _PA_META_TTL:
+            return {k: _pa_meta_cache[k] for k in ("exists", "mtime", "by")}
+    meta = {"exists": True, "mtime": 0.0, "by": ""}
+    try:
+        d = _pa_call("meta")
+        meta["mtime"] = _pa_parse_time(d.get("mtime") or d.get("Modified") or "")
+        meta["by"] = str(d.get("by") or "")
+        meta["exists"] = bool(d.get("exists", True))
+    except _uerr.HTTPError as e:
+        if e.code == 404:
+            meta["exists"] = False
+        else:
+            raise
+    with _pa_lock:
+        _pa_meta_cache.update(meta)
+        _pa_meta_cache["at"] = now
+    return dict(meta)
+
+
+def _pa_save_actual(actuals, user_email):
+    """Gửi danh sách {part, actual} cho flow -> Office Script ghi cột ThucTe."""
+    d = _pa_call("save_actual", {"email": user_email, "actuals": actuals}, timeout=90)
+    with _pa_lock:
+        _pa_meta_cache["at"] = 0.0
+    n = int(d.get("parts") or d.get("updated") or 0)
+    return {
+        "status": "ok",
+        "updated": int(d.get("updated") or 0),
+        "parts": n,
+        "missing": int(d.get("missing") or 0),
+        "mtime": _pa_parse_time(d.get("mtime") or ""),
+        "filename": PLAN_FILE_NAME,
+        "message": d.get("message") or ("Đã cập nhật Thực tế cho %d part lên SharePoint" % n),
+    }
+
+
+def _pa_save_khsx(headers, rows, user_email):
+    """Gửi headers + rows cho flow -> Office Script ghi lại sheet KHSX_Dong."""
+    d = _pa_call("save_khsx", {"email": user_email, "headers": headers, "rows": rows}, timeout=90)
+    with _pa_lock:
+        _pa_meta_cache["at"] = 0.0
+    return {
+        "status": "ok",
+        "mtime": _pa_parse_time(d.get("mtime") or ""),
+        "filename": PLAN_FILE_NAME,
+    }
+
+
 def _plan_read_bytes():
-    """(bytes, mtime) của file kế hoạch — GitHub hoặc đĩa."""
+    """(bytes, mtime) của file kế hoạch — Power Automate/SharePoint, GitHub hoặc đĩa."""
+    if USE_POWER_AUTOMATE:
+        return _pa_get_file()
     if USE_GITHUB:
         content, _sha = _gh_get_file()
         return content, _gh_meta().get("mtime", 0.0)
@@ -422,6 +547,8 @@ def _plan_read_bytes():
 
 
 def _plan_meta():
+    if USE_POWER_AUTOMATE:
+        return _pa_meta()
     if USE_GITHUB:
         return _gh_meta()
     fp = os.path.join(get_workspace_dir(), PLAN_FILE_NAME)
@@ -655,7 +782,9 @@ def save_khsx_dong_endpoint(payload: SaveKHSXDongPayload, request: Request):
         return {"status": "ok"}
 
     try:
-        if USE_GITHUB:
+        if USE_POWER_AUTOMATE:
+            result = _pa_save_khsx(payload.headers, payload.rows, _req_email(request))
+        elif USE_GITHUB:
             result = _mutate_plan_workbook(_req_email(request), _apply)
         else:
             safe_name, fp = _get_safe_excel_path(payload.filename or "KeHoach_HanSpot_Tuan_Thang_Mau.xlsx", must_exist=True)
@@ -703,6 +832,25 @@ def save_actual_endpoint(payload: SaveActualPayload, request: Request):
         want[_norm(pt)] = max(0, a_val)
     if not want:
         return {"status": "ok", "updated": 0, "message": "Không có dữ liệu để cập nhật"}
+
+    if USE_POWER_AUTOMATE:
+        clean = []
+        for it in (payload.actuals or []):
+            pt = it.get("part")
+            if pt is None:
+                continue
+            try:
+                av = int(round(float(it.get("actual", 0) or 0)))
+            except (ValueError, TypeError):
+                av = 0
+            clean.append({"part": str(pt), "actual": max(0, av)})
+        try:
+            return _pa_save_actual(clean, _req_email(request))
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception("Loi ghi Thuc te qua Power Automate")
+            raise HTTPException(status_code=502, detail="Khong ghi duoc Thuc te len SharePoint (xem log server).")
 
     THUCTE_ALIASES = ("thucte", "actual", "thuchien", "thuctehien", "dalam")
 
