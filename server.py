@@ -39,7 +39,7 @@ app = FastAPI(title="Dieu Do Han Spot - FJSP Backend API")
 # Gemini bằng trình duyệt bị VÔ HIỆU trên cloud (dữ liệu chỉ nằm ở SharePoint).
 # Chạy trên máy cá nhân (run.bat, 127.0.0.1) thì giữ nguyên như cũ.
 # ============================================================
-CLOUD_MODE = (os.environ.get("REQUIRE_AUTH", "").strip() == "1") or bool(os.environ.get("RENDER"))
+CLOUD_MODE = (os.environ.get("REQUIRE_AUTH", "").strip() == "1") or bool(os.environ.get("RENDER")) or bool(os.environ.get("SPACE_ID"))
 ENTRA_TENANT_ID = os.environ.get("ENTRA_TENANT_ID", "2a19d75e-f60b-4a77-913c-5b28b27bef09").strip().lower()
 ENTRA_CLIENT_ID = os.environ.get("ENTRA_CLIENT_ID", "3a219e32-7e6f-40df-84a8-b25a1f8f5ded").strip().lower()
 ALLOWED_EMAIL_DOMAIN = os.environ.get("ALLOWED_EMAIL_DOMAIN", "ckthanhdat.vn").strip().lower().lstrip("@")

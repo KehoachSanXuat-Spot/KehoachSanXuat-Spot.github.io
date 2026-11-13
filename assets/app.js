@@ -199,6 +199,33 @@ function formatClockTime(minutesFromStart){
   return formatCalendarTime(minutesFromStart);
 }
 
+// Giờ Hà Nội (Asia/Ho_Chi_Minh) hiện tại, dạng "13-Nov 10:52:07" — độc lập múi giờ của máy
+function hanoiClockString(){
+  try{
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      day: "2-digit", month: "short",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false
+    }).formatToParts(new Date());
+    const get = t => (parts.find(p => p.type === t) || {}).value || "";
+    return `${get("day")}-${get("month")} ${get("hour")}:${get("minute")}:${get("second")}`;
+  }catch(e){
+    const d = new Date(), p = x => String(x).padStart(2, "0");
+    return `${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+}
+// Đồng hồ thanh tiến độ: LIVE = giờ Hà Nội thật (tới giây); tua tay = giờ timeline kèm giây
+function formatProgressClock(minutesFromStart, live){
+  if(live) return hanoiClockString();
+  const totalSec = Math.max(0, Math.round(minutesFromStart * 60));
+  const dayIdx = Math.floor(totalSec / 86400);
+  const rem = totalSec % 86400;
+  const hh = Math.floor(rem / 3600), mm = Math.floor((rem % 3600) / 60), ss = rem % 60;
+  const p = x => String(x).padStart(2, "0");
+  const lbl = (model && model.dateLabels && model.dateLabels[dayIdx]) ? model.dateLabels[dayIdx] : `N${dayIdx + 1}`;
+  return `${lbl} ${p(hh)}:${p(mm)}:${p(ss)}`;
+}
+
 function getMachineBlocks(mi, numDays = 60){
   const sh = getMachineShiftInfo(mi);
   const blocks = [];
@@ -4465,9 +4492,57 @@ function computeKHSXDongData(schedule, model){
 
   let dateLabels = (model.dateLabels && model.dateLabels.length > 0) ? [...model.dateLabels] : [];
   const maxDay = Math.ceil(schedule.makespan / 1440);
-  while(dateLabels.length < Math.max(10, maxDay)){
-    dateLabels.push(`Ngày ${dateLabels.length + 1}`);
+
+  // --- Mở rộng danh sách cột ngày để phủ HẾT kế hoạch (tới mốc Hạn giao muộn nhất) ---
+  // Nhiều file chỉ có sẵn vài cột ngày (06-Nov..13-Nov) nhưng Hạn giao lại tới 15-Nov.
+  // Ta tự sinh tiếp các nhãn ngày lịch thật (14-Nov, 15-Nov...) để hiển thị đủ.
+  const _MONTHS_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const _parseDM = (str) => {
+    if(!str) return null;
+    const m = String(str).match(/(\d{1,2})[-/]([A-Za-z]{3}|\d{1,2})/i);
+    if(!m) return null;
+    const day = parseInt(m[1], 10);
+    const ms = m[2].toLowerCase();
+    let month = parseInt(ms, 10);
+    if(isNaN(month)) month = _MONTHS_ABBR.map(x=>x.toLowerCase()).indexOf(ms.slice(0,3)) + 1;
+    if(!month || month < 1 || !day) return null;
+    return { day, month };
+  };
+  const _fmtDM = (date) => {
+    const d = date.getDate();
+    return (d < 10 ? '0' : '') + d + '-' + _MONTHS_ABBR[date.getMonth()];
+  };
+  const _year = new Date().getFullYear();
+  const _baseDM = dateLabels.length ? _parseDM(dateLabels[0]) : null;
+  const _baseDate = _baseDM ? new Date(_year, _baseDM.month - 1, _baseDM.day) : null;
+  // Chỉ số ngày (cột) muộn nhất mà Hạn giao yêu cầu
+  let _maxDueIdx = 0;
+  if(_baseDate){
+    model.parts.forEach(p => {
+      const sDue = formatExcelDateValue(p.dueDateStr || (p.dueDate ? formatClockTime(p.dueDate) : ""));
+      const dm = _parseDM(sDue);
+      if(dm){
+        const dt = new Date(_year, dm.month - 1, dm.day);
+        const idx = Math.round((dt - _baseDate) / 86400000);
+        if(idx > _maxDueIdx) _maxDueIdx = idx;
+      }
+    });
   }
+  const _needLen = Math.min(120, Math.max(dateLabels.length, 10, maxDay, _maxDueIdx + 1));
+  while(dateLabels.length < _needLen){
+    if(_baseDate){
+      const dt = new Date(_baseDate.getTime() + dateLabels.length * 86400000);
+      dateLabels.push(_fmtDM(dt));
+    } else {
+      dateLabels.push(`Ngày ${dateLabels.length + 1}`);
+    }
+  }
+
+  // Mốc hoàn thành muộn nhất của mỗi Part (để tô đỏ "Cần SX" khi kế hoạch bị trễ hạn)
+  const _partEndMin = new Map();
+  (schedule.intervals || []).forEach(iv => {
+    _partEndMin.set(iv.part, Math.max(_partEndMin.get(iv.part) || 0, iv.end));
+  });
 
   // Hỗ trợ lọc theo Phân xưởng (KhuVuc): nếu chọn 1 phân xưởng, tính sản lượng tại công đoạn cuối của Part thuộc phân xưởng đó
   const zoneMapByMachineName = new Map();
@@ -4567,7 +4642,9 @@ function computeKHSXDongData(schedule, model){
       dueDate: sDue,
       daily,
       totalScheduled: partScheduledPcs,
-      isDone: p.isDone
+      isDone: p.isDone,
+      // Trễ hạn khi lịch hoàn thành muộn hơn Hạn giao và vẫn còn phải SX
+      isLate: !!(p.dueDate && (_partEndMin.get(p.id) || 0) > p.dueDate && remQ > 0)
     });
   });
 
@@ -4646,13 +4723,13 @@ function renderKHSXDong(){
     const isSorted = (khsxSortCol === colKey);
     const arrow = isSorted ? (khsxSortAsc ? " ▲" : " ▼") : " <span style='opacity:0.35'>↕</span>";
     const headerBg = bg || (isSorted ? "#1D4ED8" : "#1E3A8A");
-    return `<th onclick="sortKHSXDong('${colKey}')" title="Bấm để sắp xếp theo ${title}" style="padding:6px 8px;border:1px solid #3b82f6;min-width:${minWidth};text-align:${align};background:${headerBg};cursor:pointer;user-select:none;transition:background 0.15s">
+    return `<th data-col="${colKey}" onclick="sortKHSXDong('${colKey}')" title="Bấm để sắp xếp theo ${title}" style="padding:6px 8px;border:1px solid #3b82f6;min-width:${minWidth};text-align:${align};background:${headerBg};cursor:pointer;user-select:none;transition:background 0.15s;position:sticky;top:0;z-index:4">
       ${title}${arrow}
     </th>`;
   };
 
-  let html = `<table style="width:100%;border-collapse:collapse;font-size:11.5px;font-family:var(--font-sans);text-align:center">`;
-  html += `<thead><tr style="background:#1E3A8A;color:#ffffff;height:34px;position:sticky;top:0;z-index:2">`;
+  let html = `<table class="khsxTable" style="width:100%;border-collapse:separate;border-spacing:0;font-size:11.5px;font-family:var(--font-sans);text-align:center">`;
+  html += `<thead><tr style="background:#1E3A8A;color:#ffffff;height:34px">`;
   html += renderTh("stt", "STT", "35px");
   html += renderTh("part", "Part", "85px", "left");
   html += renderTh("planQty", "Kế hoạch", "70px", "right");
@@ -4677,18 +4754,23 @@ function renderKHSXDong(){
     sumRem += r.remQty;
     sumScheduled += r.totalScheduled;
 
-    html += `<tr style="border-bottom:1px solid var(--line);height:30px">`;
-    html += `<td style="padding:4px 6px;border:1px solid var(--line);color:var(--muted)">${r.stt}</td>`;
-    html += `<td style="padding:4px 8px;border:1px solid var(--line);text-align:left;font-weight:600;color:var(--fg)">${r.part}</td>`;
-    html += `<td style="padding:4px 6px;border:1px solid var(--line);text-align:right;font-family:var(--font-mono)">${r.planQty.toLocaleString()}</td>`;
-    html += `<td style="padding:2px 4px;border:1px solid var(--line);text-align:right">
+    const fzBg = "background:var(--panel)";   // nền đặc cho cột đóng băng (không lộ cột ngày khi cuộn ngang)
+    const remColor = r.isLate ? "#ef4444" : "var(--accent)";
+    const remMark = r.isLate ? "⚠ " : "";
+    const remTitle = r.isLate ? ' title="⚠ Kế hoạch hoàn thành muộn hơn Hạn giao"' : '';
+    const dueColor = r.isLate ? "#ef4444" : "var(--warn)";
+    html += `<tr style="height:30px">`;
+    html += `<td style="padding:4px 6px;border:1px solid var(--line);color:var(--muted);${fzBg}">${r.stt}</td>`;
+    html += `<td style="padding:4px 8px;border:1px solid var(--line);text-align:left;font-weight:600;color:var(--fg);${fzBg}">${r.part}</td>`;
+    html += `<td style="padding:4px 6px;border:1px solid var(--line);text-align:right;font-family:var(--font-mono);${fzBg}">${r.planQty.toLocaleString()}</td>`;
+    html += `<td style="padding:2px 4px;border:1px solid var(--line);text-align:right;${fzBg}">
       <input class="thucteInput" data-part="${String(r.part).replace(/"/g,'&quot;')}" type="number" min="0" step="1" value="${r.actualQty}" title="Sửa số lượng thực tế — tự lưu vào file Excel gốc"
         style="width:60px;text-align:right;font-family:var(--font-mono);font-size:11px;background:var(--panel-2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:2px 4px">
     </td>`;
-    html += `<td style="padding:4px 6px;border:1px solid var(--line);text-align:right;font-family:var(--font-mono);font-weight:600;color:var(--accent)">${r.remQty.toLocaleString()}</td>`;
-    html += `<td style="padding:4px 6px;border:1px solid var(--line)"><span class="ptag" style="padding:1px 5px;font-size:10px">${r.priority===1?'P1':(r.priority===3?'P3':'P2')}</span></td>`;
-    html += `<td style="padding:4px 6px;border:1px solid var(--line);color:#3b82f6;font-size:11px">${r.startDate || '-'}</td>`;
-    html += `<td style="padding:4px 6px;border:1px solid var(--line);color:var(--warn);font-size:11px">${r.dueDate || '-'}</td>`;
+    html += `<td${remTitle} style="padding:4px 6px;border:1px solid var(--line);text-align:right;font-family:var(--font-mono);font-weight:${r.isLate?'800':'600'};color:${remColor};${fzBg}">${remMark}${r.remQty.toLocaleString()}</td>`;
+    html += `<td style="padding:4px 6px;border:1px solid var(--line);${fzBg}"><span class="ptag" style="padding:1px 5px;font-size:10px">${r.priority===1?'P1':(r.priority===3?'P3':'P2')}</span></td>`;
+    html += `<td style="padding:4px 6px;border:1px solid var(--line);color:#3b82f6;font-size:11px;${fzBg}">${r.startDate || '-'}</td>`;
+    html += `<td style="padding:4px 6px;border:1px solid var(--line);color:${dueColor};font-weight:${r.isLate?'700':'400'};font-size:11px;${fzBg}">${r.dueDate || '-'}</td>`;
     
     data.dateLabels.forEach(d => {
       const q = r.daily[d] || 0;
@@ -4709,22 +4791,88 @@ function renderKHSXDong(){
   }
 
   // Dòng Tổng Cộng (tính động theo các dòng đang lọc)
-  html += `<tr style="background:var(--panel-2);font-weight:bold;height:32px;border-top:2px solid var(--fg)">`;
-  html += `<td colspan="2" style="padding:6px 10px;text-align:left;border:1px solid var(--line);color:var(--fg)">TỔNG CỘNG (${rows.length} PART)</td>`;
-  html += `<td style="padding:6px;border:1px solid var(--line);text-align:right;font-family:var(--font-mono)">${sumPlan.toLocaleString()}</td>`;
-  html += `<td style="padding:6px;border:1px solid var(--line);text-align:right;font-family:var(--font-mono);color:var(--muted)">${sumActual.toLocaleString()}</td>`;
-  html += `<td style="padding:6px;border:1px solid var(--line);text-align:right;font-family:var(--font-mono);color:var(--accent)">${sumRem.toLocaleString()}</td>`;
-  html += `<td colspan="3" style="border:1px solid var(--line)"></td>`;
+  const totBg = "background:var(--panel-2)";   // nền đặc cho dòng tổng ở các cột đóng băng
+  html += `<tr style="font-weight:bold;height:32px">`;
+  html += `<td style="padding:6px;border:1px solid var(--line);border-top:2px solid var(--fg);color:var(--muted);${totBg}"></td>`;
+  html += `<td style="padding:6px 10px;text-align:left;border:1px solid var(--line);border-top:2px solid var(--fg);color:var(--fg);${totBg}">TỔNG CỘNG (${rows.length} PART)</td>`;
+  html += `<td style="padding:6px;border:1px solid var(--line);border-top:2px solid var(--fg);text-align:right;font-family:var(--font-mono);${totBg}">${sumPlan.toLocaleString()}</td>`;
+  html += `<td style="padding:6px;border:1px solid var(--line);border-top:2px solid var(--fg);text-align:right;font-family:var(--font-mono);color:var(--muted);${totBg}">${sumActual.toLocaleString()}</td>`;
+  html += `<td style="padding:6px;border:1px solid var(--line);border-top:2px solid var(--fg);text-align:right;font-family:var(--font-mono);color:var(--accent);${totBg}">${sumRem.toLocaleString()}</td>`;
+  html += `<td style="padding:6px;border:1px solid var(--line);border-top:2px solid var(--fg);${totBg}"></td>`;
+  html += `<td style="padding:6px;border:1px solid var(--line);border-top:2px solid var(--fg);${totBg}"></td>`;
+  html += `<td style="padding:6px;border:1px solid var(--line);border-top:2px solid var(--fg);${totBg}"></td>`;
   data.dateLabels.forEach(d => {
     const totD = sumDaily[d] || 0;
-    html += `<td style="padding:6px;border:1px solid var(--line);font-family:var(--font-mono);color:var(--good);background:rgba(34,197,94,0.06)">${totD > 0 ? totD.toLocaleString() : '-'}</td>`;
+    html += `<td style="padding:6px;border:1px solid var(--line);border-top:2px solid var(--fg);font-family:var(--font-mono);color:var(--good);background:rgba(34,197,94,0.06)">${totD > 0 ? totD.toLocaleString() : '-'}</td>`;
   });
-  html += `<td style="padding:6px;border:1px solid var(--line);font-family:var(--font-mono);color:#0F766E;background:rgba(15,118,110,0.15);text-align:right">${sumScheduled.toLocaleString()}</td>`;
+  html += `<td style="padding:6px;border:1px solid var(--line);border-top:2px solid var(--fg);font-family:var(--font-mono);color:#0F766E;background:rgba(15,118,110,0.15);text-align:right">${sumScheduled.toLocaleString()}</td>`;
   html += `</tr>`;
 
   html += `</tbody></table>`;
   wrap.innerHTML = html;
+  applyKhsxFreeze(wrap, 8);
 }
+
+/* Đóng băng (Freeze Panes) 8 cột đầu — tới cột "Hạn giao" — khi cuộn ngang xem các cột ngày.
+   Đo bề rộng thực tế của tiêu đề rồi ghim sticky-left theo đúng vị trí từng cột. */
+function applyKhsxFreeze(wrap, frozenCount){
+  const table = wrap && wrap.querySelector("table.khsxTable");
+  if(!table || !table.tHead || !table.tHead.rows[0]) return;
+  const headCells = table.tHead.rows[0].cells;
+  const n = Math.min(frozenCount, headCells.length);
+  if(n <= 0) return;
+  // Bảng đang ẩn (chưa có bề rộng) → bỏ qua, sẽ ghim lại khi mở tab
+  if(headCells[0].getBoundingClientRect().width < 1) return;
+  const lefts = [];
+  let acc = 0;
+  for(let i=0;i<n;i++){
+    lefts.push(acc);
+    acc += headCells[i].getBoundingClientRect().width;
+  }
+  const stick = (cell, i, isHeader) => {
+    cell.style.position = "sticky";
+    cell.style.left = lefts[i] + "px";
+    cell.style.zIndex = isHeader ? "7" : "3";
+    if(i === n - 1) cell.style.boxShadow = "3px 0 5px -2px rgba(0,0,0,0.45)";
+  };
+  for(let i=0;i<n;i++) stick(headCells[i], i, true);
+  for(const tb of table.tBodies){
+    for(const row of tb.rows){
+      if(row.cells.length < n) continue;   // bỏ qua dòng "không tìm thấy" (dùng colspan)
+      for(let i=0;i<n;i++) stick(row.cells[i], i, false);
+    }
+  }
+}
+
+/* Xem Kế hoạch Động ở chế độ TOÀN MÀN HÌNH */
+function toggleKHSXFullscreen(){
+  const pane = document.getElementById("pane-khsxDong");
+  if(!pane) return;
+  const inFs = (document.fullscreenElement === pane || document.webkitFullscreenElement === pane);
+  if(!inFs){
+    if(pane.requestFullscreen) pane.requestFullscreen();
+    else if(pane.webkitRequestFullscreen) pane.webkitRequestFullscreen();
+  } else {
+    if(document.exitFullscreen) document.exitFullscreen();
+    else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
+  }
+}
+function _onKHSXFsChange(){
+  const pane = document.getElementById("pane-khsxDong");
+  const btn = document.getElementById("btnFullscreenKHSX");
+  const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+  const inFs = (pane && fsEl === pane);
+  if(pane) pane.classList.toggle("khsx-fs", !!inFs);
+  if(btn){ const s = btn.querySelector("span"); if(s) s.textContent = inFs ? "✕ Thoát toàn màn hình" : "⛶ Toàn màn hình"; }
+  // Render lại để đo & ghim lại các cột đóng băng theo bề rộng mới
+  if(typeof renderKHSXDong === "function") setTimeout(renderKHSXDong, 60);
+}
+document.addEventListener("fullscreenchange", _onKHSXFsChange);
+document.addEventListener("webkitfullscreenchange", _onKHSXFsChange);
+window.addEventListener("resize", () => {
+  const pane = document.getElementById("pane-khsxDong");
+  if(pane && !pane.hidden){ const w = document.getElementById("khsxDongTableWrap"); if(w) applyKhsxFreeze(w, 8); }
+});
 
 function exportKHSXDongExcel(){
   if(!schedule || !model){
@@ -4936,7 +5084,7 @@ function loop(ts){
   renderStats();
   document.getElementById("tNow").textContent=Math.round(sim.t);
   const elClock = document.getElementById("tClock");
-  if(elClock) elClock.textContent = (sim.liveMode ? "🔴 LIVE " : "") + formatClockTime(sim.t);
+  if(elClock) elClock.textContent = (sim.liveMode ? "🔴 LIVE " : "") + formatProgressClock(sim.t, sim.liveMode);
   requestAnimationFrame(loop);
 }
 function syncScrub(){ document.getElementById("scrub").value=Math.round(1000*sim.t/Math.max(1,schedule.makespan)); }
@@ -6953,6 +7101,8 @@ const btnExpKHSX = document.getElementById("btnExportKHSXDong");
 if(btnExpKHSX) btnExpKHSX.addEventListener("click", exportKHSXDongExcel);
 const btnSaveKHSX = document.getElementById("btnSaveKHSXDongToExcel");
 if(btnSaveKHSX) btnSaveKHSX.addEventListener("click", saveKHSXDongToExcel);
+const btnFsKHSX = document.getElementById("btnFullscreenKHSX");
+if(btnFsKHSX) btnFsKHSX.addEventListener("click", toggleKHSXFullscreen);
 // Sửa trực tiếp cột "Thực tế" trong bảng KHSX_Dong (uỷ quyền vì bảng render lại nhiều lần)
 const khsxWrapEl = document.getElementById("khsxDongTableWrap");
 if(khsxWrapEl) khsxWrapEl.addEventListener("change", (e) => {

@@ -166,3 +166,9 @@ footer{flex:0 0 auto;padding:7px 14px;color:var(--faint);font-size:11px;text-ali
   .viz{height:auto}
 }
 @media (max-width:560px){ .stage{height:50vh} header h1{font-size:17px} header .sub{display:none} }
+
+/* ===== Kế hoạch Động: chế độ TOÀN MÀN HÌNH ===== */
+#pane-khsxDong.khsx-fs{ background:var(--panel); padding:16px 18px; overflow:auto; }
+#pane-khsxDong.khsx-fs #khsxDongTableWrap{ max-height:calc(100vh - 150px); overflow:auto; }
+#pane-khsxDong:fullscreen{ background:var(--panel); }
+#pane-khsxDong:-webkit-full-screen{ background:var(--panel); }

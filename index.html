@@ -2,7 +2,7 @@
 <html lang="vi">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://login.microsoftonline.com https://kehoachsanxuat-spot-github-io.onrender.com; frame-src https://login.microsoftonline.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self' https://login.microsoftonline.com">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://login.microsoftonline.com https://kehoachsanxuat-spot-github-io.onrender.com https://ovcopenclaw-webapp.hf.space; frame-src https://login.microsoftonline.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self' https://login.microsoftonline.com">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <meta name="robots" content="noindex, nofollow">
 <title>Xưởng Hàn Spot · AI Gemini Copilot</title>
@@ -323,8 +323,8 @@
                 <button class="btn ghost" id="btnExportKHSXDong" style="padding:5px 10px;font-size:11px;display:flex;align-items:center;gap:4px">
                   <span>📥 Tải Excel (KHSX_Dong)</span>
                 </button>
-                <button class="btn" id="btnSaveKHSXDongToExcel" style="padding:5px 10px;font-size:11px;background:#1a9e6a;display:flex;align-items:center;gap:4px">
-                  <span>💾 Lưu vào File Excel gốc</span>
+                <button class="btn" id="btnFullscreenKHSX" style="padding:5px 10px;font-size:11px;background:#1d4ed8;display:flex;align-items:center;gap:4px" title="Xem Kế hoạch Động ở chế độ toàn màn hình (Esc để thoát)">
+                  <span>⛶ Toàn màn hình</span>
                 </button>
               </div>
             </div>
@@ -506,7 +506,7 @@
         </div>
         <div class="transport">
           <button class="play" id="playBtn">▶</button>
-          <div class="clock mono" style="min-width:140px">t=<b id="tNow">0</b>p (<span id="tClock" style="color:var(--accent)">08:00</span>) / <span id="tEnd">0</span>p</div>
+          <div class="clock mono" style="min-width:170px">t=<b id="tNow">0</b>p (<span id="tClock" style="color:var(--accent)">08:00:00</span>) / <span id="tEnd">0</span>p</div>
           <input type="range" class="scrub" id="scrub" min="0" max="1000" value="0">
           <div class="speed"><span>Tốc độ</span>
             <select id="speed">
