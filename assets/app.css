@@ -170,5 +170,7 @@ footer{flex:0 0 auto;padding:7px 14px;color:var(--faint);font-size:11px;text-ali
 /* ===== Kế hoạch Động: chế độ TOÀN MÀN HÌNH ===== */
 #pane-khsxDong.khsx-fs{ background:var(--panel); padding:16px 18px; overflow:auto; }
 #pane-khsxDong.khsx-fs #khsxDongTableWrap{ max-height:calc(100vh - 150px); overflow:auto; }
+/* Chế độ thường: giới hạn chiều cao khung bảng để thanh cuộn ngang luôn trong tầm nhìn */
+#khsxDongTableWrap{ max-height:calc(100vh - 290px); min-height:300px; overflow:auto; }
 #pane-khsxDong:fullscreen{ background:var(--panel); }
 #pane-khsxDong:-webkit-full-screen{ background:var(--panel); }
