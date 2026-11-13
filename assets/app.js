@@ -1634,6 +1634,9 @@ function showWarnings(ws){
    ============================================================ */
 let THREE_OK = (typeof THREE!=="undefined");
 let renderer,scene,camera,machineMeshes=[],partCubes=[],threeReady=false;
+// Trần pixel-ratio thích ứng: bắt đầu 2.0, tự hạ khi FPS thấp (chạy mượt máy yếu)
+let PIXEL_CAP = 2.0;
+let _fpsSmooth = 60, _gfxFrames = 0, _gfxDownshifts = 0;
 let orbit={az:-0.6,el:0.95,r:1,cx:0,cy:0,cz:0,drag:false,dragMode:"rotate",px:0,py:0};
 
 function fitView3D(){
@@ -1710,7 +1713,7 @@ function initThree(){
   });
 
   // Tối ưu độ nét cực cao (HiDPI / SuperSharp 2.5x)
-  renderer.setPixelRatio(Math.min(2.5, window.devicePixelRatio || 1));
+  renderer.setPixelRatio(Math.min(PIXEL_CAP, window.devicePixelRatio || 1));
   if(THREE.SRGBColorSpace) renderer.outputColorSpace = THREE.SRGBColorSpace;
   else if(THREE.sRGBEncoding) renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -1743,11 +1746,62 @@ function initThree(){
   dir2.position.set(-35, 45, -45);
   scene.add(dir2);
 
+  // Môi trường phản chiếu (IBL): kim loại phản chiếu ánh đèn trần, nổi khối chân thực.
+  buildStudioEnvironment();
+  // Sương công nghiệp mờ cho chiều sâu (màu cập nhật theo theme ở updateSceneTheme).
+  scene.fog = new THREE.Fog(0x18212b, 180, 520);
+
   buildMachines();
   bindOrbit(canvas);
   threeReady=true;
   const ro=new ResizeObserver(resizeThree); ro.observe(canvas.parentElement);
   resizeThree();
+}
+
+/* Bản đồ môi trường (IBL) dựng bằng gradient trần→sàn + vài dải đèn, qua PMREM.
+   Không cần addon examples/jsm — chỉ dùng core THREE r160. Cho mọi vật liệu
+   MeshStandardMaterial phản chiếu môi trường → kim loại/sơn bóng trông thật hơn. */
+function buildStudioEnvironment(){
+  if(!renderer || !scene || typeof THREE.PMREMGenerator === "undefined") return;
+  try{
+    const c = document.createElement("canvas"); c.width = 512; c.height = 256;
+    const x = c.getContext("2d");
+    const g = x.createLinearGradient(0, 0, 0, 256);
+    g.addColorStop(0.00, "#b4c0d0");   // trần sáng
+    g.addColorStop(0.45, "#717c8c");
+    g.addColorStop(0.55, "#4c5767");
+    g.addColorStop(1.00, "#1e242c");   // sàn tối
+    x.fillStyle = g; x.fillRect(0, 0, 512, 256);
+    // Dải đèn trần nhà xưởng → tạo highlight chạy dọc trên bề mặt kim loại
+    x.fillStyle = "rgba(255,255,255,0.55)";
+    for(let i=0;i<4;i++){ x.fillRect(36 + i*130, 26, 74, 12); }
+    const tex = new THREE.CanvasTexture(c);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    if(THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    pmrem.compileEquirectangularShader();
+    const envRT = pmrem.fromEquirectangular(tex);
+    scene.environment = envRT.texture;
+    tex.dispose(); pmrem.dispose();
+  }catch(e){ console.warn("[3D] Không tạo được environment map:", e); }
+}
+
+/* Hiệu năng thích ứng: đo FPS mượt; nếu tụt lâu thì hạ pixel-ratio (2.0→1.5→1.25)
+   cho mượt máy yếu, khi khoẻ lại thì nâng dần về. Chỉ gọi khi đang xem tab 3D. */
+function adaptGfx(dt){
+  if(!renderer || !(dt > 0)) return;
+  _fpsSmooth = _fpsSmooth * 0.9 + (1/dt) * 0.1;
+  if(++_gfxFrames < 90) return;        // chờ ~1.5s cho số liệu ổn định
+  _gfxFrames = 0;
+  if(_fpsSmooth < 30 && _gfxDownshifts < 2){
+    _gfxDownshifts++;
+    PIXEL_CAP = (_gfxDownshifts === 1) ? 1.5 : 1.25;
+    resizeThree();
+  } else if(_fpsSmooth > 52 && _gfxDownshifts > 0){
+    _gfxDownshifts--;
+    PIXEL_CAP = (_gfxDownshifts === 0) ? 2.0 : 1.5;
+    resizeThree();
+  }
 }
 let factoryEnvGroup = null;
 let agvFleet = [];
@@ -3410,16 +3464,8 @@ function buildMachines(){
   floor.receiveShadow = true;
   scene.add(floor);
 
-  // Lưới tọa độ không gian bên ngoài nhà xưởng
-  const grid = new THREE.GridHelper(orbit.r * 4.5, 48, 0x33414f, 0x222b35);
-  if(grid.material){
-    grid.material.transparent = true;
-    grid.material.opacity = 0.40;
-  }
-  grid.position.set(orbit.cx, 0.0, orbit.cz);
+  // (Đã bỏ lưới tọa độ nền theo yêu cầu) — gỡ lưới cũ nếu còn sót trong scene
   const og = scene.getObjectByName("grid"); if(og) scene.remove(og);
-  grid.name = "grid";
-  scene.add(grid);
   updateSceneTheme();
 }
 function makeLabel(text, power){
@@ -3559,7 +3605,7 @@ function bindOrbit(canvas){
 function resizeThree(){
   if(!renderer)return; const c=document.getElementById("three"); const p=c.parentElement;
   const w=p.clientWidth,h=p.clientHeight; if(w<2||h<2)return;
-  renderer.setPixelRatio(Math.min(2.5, window.devicePixelRatio || 1));
+  renderer.setPixelRatio(Math.min(PIXEL_CAP, window.devicePixelRatio || 1));
   renderer.setSize(w,h,false);
   camera.aspect=w/h; camera.updateProjectionMatrix();
 }
@@ -3573,6 +3619,10 @@ function updateSceneTheme(){
     // Nền bên ngoài xưởng luôn là màu nền ứng dụng (Dark: #18212b, Light: #dfe5ec)
     floor.material.color.set(dark ? 0x18212b : 0xdfe5ec);
     floor.material.roughness = 1.0;
+  }
+  if(scene.fog){
+    // Sương hoà cùng màu nền theo theme để chiều sâu không bị "hụt" rìa cảnh
+    scene.fog.color.set(dark ? 0x18212b : 0xdfe5ec);
   }
   if(grid && grid.material){
     grid.material.opacity = dark ? 0.40 : 0.22;
@@ -3724,9 +3774,10 @@ function renderThree(){
     }
 
     if(iv){
-      m.upElecMat.emissive.setHex(HOT); m.upElecMat.emissiveIntensity=pulse*1.9;
-      m.loElecMat.emissive.setHex(HOT); m.loElecMat.emissiveIntensity=pulse*1.9;
-      m.ledMat.color.setHex(0xff7a2d); m.ledMat.emissive.setHex(HOT); m.ledMat.emissiveIntensity=pulse;
+      const arcF = 0.72 + 0.5 * Math.random();   // nhấp nháy hồ quang ngẫu nhiên cho sống động
+      m.upElecMat.emissive.setHex(HOT); m.upElecMat.emissiveIntensity=pulse*2.5*arcF;
+      m.loElecMat.emissive.setHex(HOT); m.loElecMat.emissiveIntensity=pulse*2.5*arcF;
+      m.ledMat.color.setHex(0xff7a2d); m.ledMat.emissive.setHex(HOT); m.ledMat.emissiveIntensity=pulse*1.15;
       const col=new THREE.Color(partColor(iv.pi));
       m.work.visible=true; m.workMat.color.copy(col); m.workMat.emissive.copy(col).multiplyScalar(0.18);
 
@@ -5079,7 +5130,7 @@ function loop(ts){
     }
   }
   // render view đang mở
-  if(activeTab==="three"&&THREE_OK) renderThree();
+  if(activeTab==="three"&&THREE_OK){ renderThree(); adaptGfx(dt); }
   else if(activeTab==="gantt") renderGantt();
   renderStats();
   document.getElementById("tNow").textContent=Math.round(sim.t);
