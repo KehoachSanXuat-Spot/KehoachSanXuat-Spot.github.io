@@ -6257,7 +6257,9 @@ function setTab(name){
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.pane===name));
   document.querySelectorAll(".pane").forEach(p=>p.hidden = p.id!=="pane-"+name);
   if(name==="three") resizeThree();
-  if(name==="gantt"){ renderGantt(); _lastGanttT = sim.t; _lastGanttMs = performance.now(); }
+  // KHÔNG vẽ Gantt đồng bộ ở đây (bấm chuyển tab nhanh sẽ dồn nhiều lần vẽ nặng -> treo).
+  // Chỉ đặt cờ để vòng lặp vẽ 1 lần ở frame kế tiếp (không chặn luồng khi click).
+  if(name==="gantt"){ _lastGanttT = -1; _lastGanttMs = 0; }
   if(name==="khsxDong") renderKHSXDong();
   if(name==="wip") renderWipPlan();
   if(name==="workers") renderWorkersPlan();
