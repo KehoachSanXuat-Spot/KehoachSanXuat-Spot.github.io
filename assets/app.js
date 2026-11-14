@@ -6740,6 +6740,7 @@ function exportWorkersExcel(){
 
 function setTab(name){
   activeTab=name;
+  if (typeof closeMobileSidebar === "function") closeMobileSidebar();
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.pane===name));
   document.querySelectorAll(".pane").forEach(p=>p.hidden = p.id!=="pane-"+name);
   if(name==="three") resizeThree();
@@ -8096,3 +8097,71 @@ requestAnimationFrame(loop);
 initExcelAutoWatch();
 checkBrainStatus(); // Kích hoạt kiểm tra và kết nối Bộ Não AI Gemini ngay khi khởi động
 restoreAutoCheckSetting(); // Khôi phục chu kỳ AI tự động kiểm tra (nếu lần trước đã bật)
+
+/* ============================================================
+   MOBILE PHONE RESPONSIVE DRAWER & TABLE ZOOM
+   ============================================================ */
+function toggleMobileDrawer(mode) {
+  const app = document.getElementById("app");
+  if (!app) return;
+  if (mode === "stats") {
+    if (app.classList.contains("drawer-open-right")) {
+      app.classList.remove("drawer-open-right");
+    } else {
+      app.classList.remove("drawer-open-left");
+      app.classList.add("drawer-open-right");
+    }
+  } else {
+    // Mặc định 'input'
+    if (app.classList.contains("drawer-open-left")) {
+      app.classList.remove("drawer-open-left");
+    } else {
+      app.classList.remove("drawer-open-right");
+      app.classList.add("drawer-open-left");
+    }
+  }
+}
+
+function closeMobileSidebar() {
+  const app = document.getElementById("app");
+  if (app) {
+    app.classList.remove("drawer-open-left");
+    app.classList.remove("drawer-open-right");
+  }
+}
+
+let curTableZoom = 1.0;
+function adjustTableZoom(delta, reset) {
+  if (reset) {
+    curTableZoom = 1.0;
+  } else {
+    curTableZoom = Math.min(2.0, Math.max(0.6, +(curTableZoom + delta).toFixed(2)));
+  }
+  document.documentElement.style.setProperty("--table-zoom", curTableZoom);
+  document.querySelectorAll(".zoomLevelLbl").forEach(el => {
+    el.textContent = Math.round(curTableZoom * 100) + "%";
+  });
+  try { localStorage.setItem("xuong_spot_table_zoom", curTableZoom); } catch(e){}
+}
+
+function initTableZoom() {
+  try {
+    const saved = localStorage.getItem("xuong_spot_table_zoom");
+    if (saved) {
+      const z = parseFloat(saved);
+      if (!isNaN(z) && z >= 0.6 && z <= 2.0) {
+        curTableZoom = z;
+        document.documentElement.style.setProperty("--table-zoom", curTableZoom);
+        document.querySelectorAll(".zoomLevelLbl").forEach(el => {
+          el.textContent = Math.round(curTableZoom * 100) + "%";
+        });
+      }
+    }
+  } catch(e){}
+}
+
+initTableZoom();
+
+window.toggleMobileDrawer = toggleMobileDrawer;
+window.closeMobileSidebar = closeMobileSidebar;
+window.adjustTableZoom = adjustTableZoom;
