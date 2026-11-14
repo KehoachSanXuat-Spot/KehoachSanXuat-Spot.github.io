@@ -167,14 +167,13 @@ footer{flex:0 0 auto;padding:7px 14px;color:var(--faint);font-size:11px;text-ali
 }
 @media (max-width:560px){ .stage{height:50vh} header h1{font-size:17px} header .sub{display:none} }
 
+/* Khung bảng KHSX_Dong: giới hạn chiều cao ở chế độ thường để thanh cuộn ngang
+   luôn nằm trong tầm nhìn (nếu không, bảng cao bằng cả 157 dòng → cuộn ngang bị
+   đẩy xuống tận đáy, không thấy được các ngày cuối như 14-15/11). */
+#khsxDongTableWrap{ max-height:calc(100vh - 290px); min-height:300px; overflow:auto; }
+
 /* ===== Kế hoạch Động: chế độ TOÀN MÀN HÌNH ===== */
 #pane-khsxDong.khsx-fs{ background:var(--panel); padding:16px 18px; overflow:auto; }
 #pane-khsxDong.khsx-fs #khsxDongTableWrap{ max-height:calc(100vh - 150px); overflow:auto; }
-/* Chế độ thường: giới hạn chiều cao khung bảng để thanh cuộn ngang luôn trong tầm nhìn */
-#khsxDongTableWrap{ max-height:calc(100vh - 290px); min-height:300px; overflow:auto; }
-/* Ô chọn ngày Bắt đầu/Hạn giao: lịch gốc trình duyệt hợp theme sáng/tối */
-.khsxStartInput, .khsxDueInput{ color-scheme: light dark; }
-:root[data-theme="dark"]  .khsxStartInput, :root[data-theme="dark"]  .khsxDueInput{ color-scheme: dark; }
-:root[data-theme="light"] .khsxStartInput, :root[data-theme="light"] .khsxDueInput{ color-scheme: light; }
 #pane-khsxDong:fullscreen{ background:var(--panel); }
 #pane-khsxDong:-webkit-full-screen{ background:var(--panel); }
