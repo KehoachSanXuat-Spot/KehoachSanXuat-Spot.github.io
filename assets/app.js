@@ -1154,6 +1154,7 @@ function parseWorkbook(wb, preferredPlanSheet = null, preferredDsMode = null){
     machineBrokenStatus,
     warehouses,
     dateLabels,
+    shiftLength,
     dsSheets,
     dsMode,
     planSheets: [khSheetName || "KeHoachSanXuat"],
@@ -4824,18 +4825,35 @@ function renderKHSXDong(){
     const remMark = r.isLate ? "⚠ " : "";
     const remTitle = r.isLate ? ' title="⚠ Kế hoạch hoàn thành muộn hơn Hạn giao"' : '';
     const dueColor = r.isLate ? "#ef4444" : "var(--warn)";
+    const pEsc = String(r.part).replace(/"/g, '&quot;');
     html += `<tr style="height:30px">`;
     html += `<td style="padding:4px 6px;border:1px solid var(--line);color:var(--muted);${fzBg}">${r.stt}</td>`;
     html += `<td style="padding:4px 8px;border:1px solid var(--line);text-align:left;font-weight:600;color:var(--fg);${fzBg}">${r.part}</td>`;
-    html += `<td style="padding:4px 6px;border:1px solid var(--line);text-align:right;font-family:var(--font-mono);${fzBg}">${r.planQty.toLocaleString()}</td>`;
+    html += `<td style="padding:2px 4px;border:1px solid var(--line);text-align:right;${fzBg}">
+      <input class="khsxPlanInput" data-part="${pEsc}" type="number" min="0" step="1" value="${r.planQty}" title="Sửa Kế hoạch (SoLuong) — ghi vào Excel gốc"
+        style="width:60px;text-align:right;font-family:var(--font-mono);font-size:11px;background:var(--panel-2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:2px 4px">
+    </td>`;
     html += `<td style="padding:2px 4px;border:1px solid var(--line);text-align:right;${fzBg}">
       <input class="thucteInput" data-part="${String(r.part).replace(/"/g,'&quot;')}" type="number" min="0" step="1" value="${r.actualQty}" title="Sửa số lượng thực tế — tự lưu vào file Excel gốc"
         style="width:60px;text-align:right;font-family:var(--font-mono);font-size:11px;background:var(--panel-2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:2px 4px">
     </td>`;
     html += `<td${remTitle} style="padding:4px 6px;border:1px solid var(--line);text-align:right;font-family:var(--font-mono);font-weight:${r.isLate?'800':'600'};color:${remColor};${fzBg}">${remMark}${r.remQty.toLocaleString()}</td>`;
-    html += `<td style="padding:4px 6px;border:1px solid var(--line);${fzBg}"><span class="ptag" style="padding:1px 5px;font-size:10px">${r.priority===1?'P1':(r.priority===3?'P3':'P2')}</span></td>`;
-    html += `<td style="padding:4px 6px;border:1px solid var(--line);color:#3b82f6;font-size:11px;${fzBg}">${r.startDate || '-'}</td>`;
-    html += `<td style="padding:4px 6px;border:1px solid var(--line);color:${dueColor};font-weight:${r.isLate?'700':'400'};font-size:11px;${fzBg}">${r.dueDate || '-'}</td>`;
+    html += `<td style="padding:2px 4px;border:1px solid var(--line);${fzBg}">
+      <select class="khsxPriInput" data-part="${pEsc}" title="Sửa Ưu tiên — ghi vào Excel gốc"
+        style="font-size:10px;background:var(--panel-2);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:2px 3px">
+        <option value="1"${r.priority===1?' selected':''}>P1</option>
+        <option value="2"${(r.priority!==1&&r.priority!==3)?' selected':''}>P2</option>
+        <option value="3"${r.priority===3?' selected':''}>P3</option>
+      </select>
+    </td>`;
+    html += `<td style="padding:2px 4px;border:1px solid var(--line);${fzBg}">
+      <input class="khsxStartInput" data-part="${pEsc}" type="text" value="${String(r.startDate||'').replace(/"/g,'&quot;')}" placeholder="-" title="Sửa Bắt đầu (vd 09-Nov) — ghi vào Excel gốc"
+        style="width:62px;text-align:center;color:#3b82f6;font-size:11px;background:var(--panel-2);border:1px solid var(--line);border-radius:4px;padding:2px 3px">
+    </td>`;
+    html += `<td style="padding:2px 4px;border:1px solid var(--line);${fzBg}">
+      <input class="khsxDueInput" data-part="${pEsc}" type="text" value="${String(r.dueDate||'').replace(/"/g,'&quot;')}" placeholder="-" title="Sửa Hạn giao (vd 15-Nov) — ghi vào Excel gốc"
+        style="width:62px;text-align:center;color:${dueColor};font-weight:${r.isLate?'700':'400'};font-size:11px;background:var(--panel-2);border:1px solid var(--line);border-radius:4px;padding:2px 3px">
+    </td>`;
     
     data.dateLabels.forEach(d => {
       const q = r.daily[d] || 0;
@@ -5079,6 +5097,83 @@ async function saveActualsToExcel(){
     setKhsxSaveStatus(`✓ Đã lưu vào ${escHtml(res.filename || targetFile)}${IS_WEB ? " (máy chủ)" : ""} lúc ${new Date().toLocaleTimeString()}`, "ok");
   }catch(e){
     setKhsxSaveStatus("⚠ Lưu lỗi: " + escHtml(e.message) + (IS_WEB ? "" : " — cần chạy app qua run.bat (có server)."), "err");
+  }
+}
+
+/* ===== Sửa trực tiếp Kế hoạch / Ưu tiên / Bắt đầu / Hạn giao → lưu vào Excel gốc ===== */
+let _planSaveTimer = null;
+const _dirtyPlan = new Map();   // partId -> snapshot {part, planQty, priority, startDate, dueDate}
+
+function _recordDirtyPlan(p){
+  _dirtyPlan.set(p.id, {
+    part: p.id,
+    planQty: (p.planQty != null) ? p.planQty : 0,
+    priority: p.priority || 2,
+    startDate: p.startDate || "",
+    dueDate: p.dueDateStr || ""
+  });
+}
+
+function onEditKHSXField(partName, field, raw){
+  if(!model || !model.parts) return;
+  const p = model.parts.find(x => x.id === partName);
+  if(!p) return;
+  const dl = model.dateLabels || [];
+  const sl = model.shiftLength || 540;
+  if(field === "plan"){
+    const v = Math.max(0, Math.round(Number(raw) || 0));
+    p.planQty = v;
+    p.qty = Math.max(0, v - (p.actualQty || 0));   // phần còn lại cần xếp lịch
+    p.isDone = ((p.actualQty || 0) >= v && (p.actualQty || 0) > 0);
+  } else if(field === "priority"){
+    p.priority = Math.max(1, Math.min(3, parseInt(raw) || 2));
+  } else if(field === "start"){
+    const s = String(raw || "").trim();
+    p.startDate = s;
+    p.minStartTime = s ? (convertDateStringToOffsetMinutes(s, dl, false, sl) || 0) : 0;
+  } else if(field === "due"){
+    const s = String(raw || "").trim();
+    p.dueDateStr = s;
+    p.dueDate = s ? (convertDateStringToOffsetMinutes(s, dl, true, sl) || null) : null;
+  } else {
+    return;
+  }
+  _recordDirtyPlan(p);
+  renderKHSXDong();
+  if(typeof renderStats === "function") renderStats();
+  if(typeof renderData === "function") renderData();
+  queuePlanSave();
+  queueResolveFromThucTe();   // lập lại lịch (dùng chung cơ chế với sửa Thực tế)
+}
+
+function queuePlanSave(){
+  setKhsxSaveStatus("⏳ Đang lưu Kế hoạch vào Excel...", "info");
+  clearTimeout(_planSaveTimer);
+  _planSaveTimer = setTimeout(savePlanToExcel, 700);
+}
+
+async function savePlanToExcel(){
+  if(!model || !model.parts) return;
+  const sentIds = [..._dirtyPlan.keys()];
+  const updates = [..._dirtyPlan.values()];
+  if(!updates.length){ setKhsxSaveStatus("✓ Không có thay đổi cần lưu", "ok"); return; }
+  const targetFile = activeWatchFile || "KeHoach_HanSpot_Tuan_Thang_Mau.xlsx";
+  try{
+    const resp = await fetch(`${API_BASE}/api/excel/save-plan`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filename: targetFile, updates })
+    });
+    if(!resp.ok){
+      const e = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(e.detail || "Lỗi lưu");
+    }
+    const res = await resp.json();
+    sentIds.forEach(id => _dirtyPlan.delete(id));   // lỗi thì giữ lại để lần sau ghi tiếp
+    if(res.mtime) lastWatchMtime = res.mtime;
+    setKhsxSaveStatus(`✓ Đã lưu Kế hoạch vào ${escHtml(res.filename || targetFile)}${IS_WEB ? " (máy chủ)" : ""} lúc ${new Date().toLocaleTimeString()}`, "ok");
+  }catch(e){
+    setKhsxSaveStatus("⚠ Lưu Kế hoạch lỗi: " + escHtml(e.message) + (IS_WEB ? "" : " — cần chạy app qua run.bat (có server)."), "err");
   }
 }
 
@@ -7171,8 +7266,16 @@ if(btnFsKHSX) btnFsKHSX.addEventListener("click", toggleKHSXFullscreen);
 // Sửa trực tiếp cột "Thực tế" trong bảng KHSX_Dong (uỷ quyền vì bảng render lại nhiều lần)
 const khsxWrapEl = document.getElementById("khsxDongTableWrap");
 if(khsxWrapEl) khsxWrapEl.addEventListener("change", (e) => {
-  const inp = e.target.closest(".thucteInput");
-  if(inp) onEditThucTe(inp.dataset.part, inp.value);
+  const tt = e.target.closest(".thucteInput");
+  if(tt){ onEditThucTe(tt.dataset.part, tt.value); return; }
+  const pl = e.target.closest(".khsxPlanInput");
+  if(pl){ onEditKHSXField(pl.dataset.part, "plan", pl.value); return; }
+  const pr = e.target.closest(".khsxPriInput");
+  if(pr){ onEditKHSXField(pr.dataset.part, "priority", pr.value); return; }
+  const st = e.target.closest(".khsxStartInput");
+  if(st){ onEditKHSXField(st.dataset.part, "start", st.value); return; }
+  const du = e.target.closest(".khsxDueInput");
+  if(du){ onEditKHSXField(du.dataset.part, "due", du.value); return; }
 });
 
 // Bộ lọc & Tìm kiếm KHSX_Dong
