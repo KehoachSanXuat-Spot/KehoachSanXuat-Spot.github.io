@@ -7144,8 +7144,14 @@ function exportWorkersExcel(){
 function setTab(name){
   activeTab=name;
   if (typeof closeMobileSidebar === "function") closeMobileSidebar();
-  if (name !== "three" && is3DFullscreen) exit3DFullscreen();
-  if (name !== "gantt" && isGanttFullscreen) exitGanttFullscreen();
+  if (name !== "three" && typeof exit3DFullscreen === "function"){
+    const p3 = document.getElementById("pane-three");
+    if(p3 && (p3.classList.contains("three-fs") || p3.classList.contains("three-landscape-fs"))) exit3DFullscreen();
+  }
+  if (name !== "gantt" && typeof exitGanttFullscreen === "function"){
+    const pg = document.getElementById("pane-gantt");
+    if(pg && (pg.classList.contains("gantt-fs") || pg.classList.contains("gantt-landscape-fs"))) exitGanttFullscreen();
+  }
   document.querySelectorAll(".tab").forEach(t => {
     const isAct = t.dataset.pane === name;
     t.classList.toggle("active", isAct);
@@ -8208,7 +8214,9 @@ if(cvGantt && tipGantt){
     const fullSpanMin = Math.max(60, effMakespan - startMin);
     const { mx, my, w, h } = ganttLocalCoord(clientX, clientY);
     const N = Math.max(1, model.machines.length);
-    const isMobile = window.innerWidth <= 900 && !isGanttFullscreen;
+    const paneG = document.getElementById("pane-gantt");
+    const isGanttFsNow = !!(paneG && (paneG.classList.contains("gantt-fs") || paneG.classList.contains("gantt-landscape-fs")));
+    const isMobile = window.innerWidth <= 900 && !isGanttFsNow;
     const labW = isMobile ? 76 : 92, padT = 34, padB = 28;
     const baseRowH = Math.max(12, Math.min(28, (h - padT - padB) / N));
     const rowH = baseRowH * ganttZoomY;
@@ -8347,7 +8355,9 @@ if(cvGantt && tipGantt){
         const { makespan: effMakespan, startMin = 0 } = getEffectiveGanttSched();
         const fullSpanMin = Math.max(60, effMakespan - startMin);
         const visSpanMin = Math.max(30, fullSpanMin / ganttZoomX);
-        const isMobile = window.innerWidth <= 900 && !isGanttFullscreen;
+        const paneG = document.getElementById("pane-gantt");
+        const isGanttFsNow = !!(paneG && (paneG.classList.contains("gantt-fs") || paneG.classList.contains("gantt-landscape-fs")));
+        const isMobile = window.innerWidth <= 900 && !isGanttFsNow;
         const labW = isMobile ? 76 : 92;
         const scale = Math.max(0.05, (loc.w - labW - 14) / visSpanMin);
         ganttPanMin = Math.max(0, Math.min(fullSpanMin - visSpanMin, ganttPanMin - dx / scale));
@@ -8750,13 +8760,10 @@ initTableZoom();
 bindMobileTablePinchZoom();
 
 window.addEventListener("resize", () => {
-  if(is3DFullscreen) sync3DFsOrientation();
-  if(isGanttFullscreen){
-    const pane = document.getElementById("pane-gantt");
-    if(pane) pane.classList.toggle("gantt-landscape-fs", window.innerHeight > window.innerWidth);
-    _lastGanttMs = 0;
-    renderGantt();
-  }
+  const p3 = document.getElementById("pane-three");
+  if(p3 && (p3.classList.contains("three-fs") || p3.classList.contains("three-landscape-fs"))) sync3DFsOrientation();
+  const pg = document.getElementById("pane-gantt");
+  if(pg && (pg.classList.contains("gantt-fs") || pg.classList.contains("gantt-landscape-fs"))) syncGanttFsOrientation();
   const wrap = document.getElementById("khsxDongTableWrap");
   if(wrap && activeTab === "khsxDong") applyKhsxFreeze(wrap, 8);
 });
