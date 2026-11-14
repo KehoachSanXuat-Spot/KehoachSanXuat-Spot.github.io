@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="vi">
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://login.microsoftonline.com https://kehoachsanxuat-spot-github-io.onrender.com https://ovcopenclaw-webapp.hf.space; frame-src https://login.microsoftonline.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self' https://login.microsoftonline.com">
 <meta name="referrer" content="strict-origin-when-cross-origin">
 <meta name="robots" content="noindex, nofollow">
@@ -100,11 +100,21 @@
       <button type="button" id="userSignOutBtn" style="background:#ef4444;border:none;color:#fff;border-radius:12px;padding:3px 8px;font-size:11px;cursor:pointer;font-weight:600" title="Đăng xuất khỏi hệ thống">Đăng xuất</button>
     </div>
     <button class="iconbtn" id="themeBtn" title="Đổi giao diện sáng/tối">◐</button>
+    <button class="iconbtn" id="mobileDrawerBtn" title="Bảng điều khiển & Cài đặt (Dữ liệu / Thống kê)" onclick="toggleMobileDrawer('input')">⚙️</button>
   </header>
 
   <main>
     <!-- ░░░ CỘT 1: DỮ LIỆU & RÀNG BUỘC ░░░ -->
-    <section class="col">
+    <section class="col col-sidebar col-left" id="colLeft">
+      <div class="mobile-sidebar-close" style="display:none;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--panel);border-radius:8px;border:1px solid var(--line);margin-bottom:2px">
+        <div style="font-weight:700;font-size:12.5px;color:var(--accent);display:flex;align-items:center;gap:6px">
+          <span>📥 Dữ Liệu & Giải Lịch</span>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button type="button" class="btn ghost" onclick="toggleMobileDrawer('stats')" style="padding:3px 7px;font-size:11px">📊 Thống kê</button>
+          <button type="button" class="btn" onclick="closeMobileSidebar()" style="padding:3px 9px;font-size:11.5px;background:#ef4444">✕ Đóng</button>
+        </div>
+      </div>
       <div class="card">
         <h2><span class="dot"></span>Dữ liệu đầu vào</h2>
         <div class="dropzone" id="drop">
@@ -270,7 +280,7 @@
     </section>
 
     <!-- ░░░ CỘT 2: MÔ PHỎNG ░░░ -->
-    <section class="col">
+    <section class="col col-main" id="colMain">
       <div class="card viz">
         <div class="tabs">
           <button class="tab active" data-pane="three">Mô phỏng 3D</button>
@@ -342,6 +352,13 @@
                   <option value="from_start">🗓️ Từ ngày đầu kỳ kế hoạch</option>
                 </select>
               </label>
+              <div style="display:inline-flex;align-items:center;gap:3px;margin-left:auto;background:var(--panel-2);border:1px solid var(--line);border-radius:5px;padding:2px 6px">
+                <span style="font-size:10.5px;color:var(--muted);padding-right:2px">🔍 Phóng to/nhỏ:</span>
+                <button type="button" class="btn ghost" onclick="adjustTableZoom(-0.1)" style="padding:1px 6px;font-size:11px;min-width:22px" title="Thu nhỏ chữ">-</button>
+                <span class="zoomLevelLbl" style="font-size:11px;font-weight:600;min-width:35px;text-align:center;color:var(--accent)">100%</span>
+                <button type="button" class="btn ghost" onclick="adjustTableZoom(0.1)" style="padding:1px 6px;font-size:11px;min-width:22px" title="Phóng to chữ">+</button>
+                <button type="button" class="btn ghost" onclick="adjustTableZoom(0, true)" style="padding:1px 5px;font-size:10px" title="Đặt lại 100%">↺</button>
+              </div>
               <span id="khsxSaveStatus" style="font-weight:600"></span>
             </div>
 
@@ -531,7 +548,16 @@
     </section>
 
     <!-- ░░░ CỘT 3: SẢN LƯỢNG THỜI GIAN THỰC ░░░ -->
-    <section class="col">
+    <section class="col col-sidebar col-right" id="colRight">
+      <div class="mobile-sidebar-close" style="display:none;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--panel);border-radius:8px;border:1px solid var(--line);margin-bottom:2px">
+        <div style="font-weight:700;font-size:12.5px;color:var(--accent);display:flex;align-items:center;gap:6px">
+          <span>📊 Thống kê & Sản lượng</span>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button type="button" class="btn ghost" onclick="toggleMobileDrawer('input')" style="padding:3px 7px;font-size:11px">📥 Dữ liệu</button>
+          <button type="button" class="btn" onclick="closeMobileSidebar()" style="padding:3px 9px;font-size:11.5px;background:#ef4444">✕ Đóng</button>
+        </div>
+      </div>
       <div class="card">
         <h2><span class="dot"></span>Tổng quan</h2>
         <div class="kpis" style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
@@ -564,9 +590,9 @@
   <footer>Bộ lập lịch heuristic client-side · để lấy lịch tối ưu dùng mô hình OR-Tools CP-SAT (file Python kèm theo)</footer>
 </div>
 
-<script>window.APP_BUILD_ID="wipfix01";</script>
+<script>window.APP_BUILD_ID="mobilefix01";</script>
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.10.0/lib/msal-browser.min.js" integrity="sha384-yXVL3cgcbuPa1TOmTYdr5MVOeFWnnXoYXcSIPBJ4lrnGHn8EZrbyurhG/xZMygBB" crossorigin="anonymous"></script>
-<script src="./config.js?v=wipfix01"></script>
-<script src="./auth.js?v=wipfix01"></script>
-<script src="./api-shim.js?v=wipfix01"></script>
-<script src="./gate.js?v=wipfix01"></script>
+<script src="./config.js?v=mobilefix01"></script>
+<script src="./auth.js?v=mobilefix01"></script>
+<script src="./api-shim.js?v=mobilefix01"></script>
+<script src="./gate.js?v=mobilefix01"></script>
