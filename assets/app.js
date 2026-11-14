@@ -4548,6 +4548,8 @@ function renderOutChart(){
 let khsxSortCol = "stt";
 let khsxSortAsc = true;
 let khsxSearchQuery = "";
+const KHSX_PER_PAGE = 50;      // số dòng/trang bảng KHSX_Dong (chống treo khi rất nhiều Part)
+let khsxPage = 1;
 let khsxZoneFilter = "all";
 let khsxPriorityFilter = "all";
 let khsxStatusFilter = "all";
@@ -4731,6 +4733,7 @@ function sortKHSXDong(colKey){
     khsxSortCol = colKey;
     khsxSortAsc = true;
   }
+  khsxPage = 1;
   renderKHSXDong();
 }
 
@@ -4783,6 +4786,23 @@ function renderKHSXDong(){
     return khsxSortAsc ? (vA - vB) : (vB - vA);
   });
 
+  // ===== Phân trang (chống treo khi rất nhiều Part) =====
+  const _khsxTotalRows = rows.length;
+  const _khsxTotalPages = Math.max(1, Math.ceil(_khsxTotalRows / KHSX_PER_PAGE));
+  if(khsxPage > _khsxTotalPages) khsxPage = _khsxTotalPages;
+  if(khsxPage < 1) khsxPage = 1;
+  const _khsxStart = (khsxPage - 1) * KHSX_PER_PAGE;
+  const pageRows = rows.slice(_khsxStart, _khsxStart + KHSX_PER_PAGE);
+
+  // Tổng cộng tính trên TOÀN BỘ dòng đã lọc (không chỉ trang hiện tại)
+  let sumPlan = 0, sumActual = 0, sumRem = 0, sumScheduled = 0;
+  const sumDaily = {};
+  data.dateLabels.forEach(d => { sumDaily[d] = 0; });
+  rows.forEach(r => {
+    sumPlan += r.planQty; sumActual += r.actualQty; sumRem += r.remQty; sumScheduled += r.totalScheduled;
+    data.dateLabels.forEach(d => { sumDaily[d] += (r.daily[d] || 0); });
+  });
+
   // Hàm render tiêu đề cột có hỗ trợ bấm sắp xếp (sortable header)
   const renderTh = (colKey, title, minWidth, align="center", bg=null) => {
     const isSorted = (khsxSortCol === colKey);
@@ -4809,16 +4829,7 @@ function renderKHSXDong(){
   html += renderTh("totalScheduled", "Tổng Đạt", "75px", "right", (khsxSortCol === "totalScheduled" ? "#0E7490" : "#0F766E"));
   html += `</tr></thead><tbody>`;
 
-  let sumPlan = 0, sumActual = 0, sumRem = 0, sumScheduled = 0;
-  const sumDaily = {};
-  data.dateLabels.forEach(d => { sumDaily[d] = 0; });
-
-  rows.forEach(r => {
-    sumPlan += r.planQty;
-    sumActual += r.actualQty;
-    sumRem += r.remQty;
-    sumScheduled += r.totalScheduled;
-
+  pageRows.forEach(r => {
     const fzBg = "background:var(--panel)";   // nền đặc cho cột đóng băng (không lộ cột ngày khi cuộn ngang)
     const remColor = r.isLate ? "#ef4444" : "var(--accent)";
     const remMark = r.isLate ? "⚠ " : "";
@@ -4839,7 +4850,6 @@ function renderKHSXDong(){
     
     data.dateLabels.forEach(d => {
       const q = r.daily[d] || 0;
-      sumDaily[d] += q;
       if(q > 0){
         html += `<td style="padding:4px 6px;border:1px solid var(--line);background:rgba(34,197,94,0.12);font-weight:bold;color:var(--good);font-family:var(--font-mono)">${q.toLocaleString()}</td>`;
       } else {
@@ -4876,7 +4886,39 @@ function renderKHSXDong(){
   html += `</tbody></table>`;
   wrap.innerHTML = html;
   applyKhsxFreeze(wrap, 8);
+  renderKhsxPager(_khsxTotalPages, _khsxTotalRows, _khsxStart, pageRows.length);
 }
+
+/* Thanh điều khiển phân trang bảng KHSX_Dong (đặt NGOÀI vùng cuộn để luôn thấy) */
+function renderKhsxPager(totalPages, totalRows, startIdx, pageCount){
+  const wrap = document.getElementById("khsxDongTableWrap");
+  if(!wrap) return;
+  let pager = document.getElementById("khsxPager");
+  if(!pager){
+    pager = document.createElement("div");
+    pager.id = "khsxPager";
+    pager.style.cssText = "display:flex;align-items:center;justify-content:center;gap:8px;padding:8px 6px;flex-wrap:wrap";
+    wrap.parentNode.insertBefore(pager, wrap.nextSibling);
+  }
+  if(totalPages <= 1){ pager.style.display = "none"; pager.innerHTML = ""; return; }
+  pager.style.display = "flex";
+  const from = startIdx + 1, to = startIdx + pageCount;
+  const btn = (label, page, disabled) =>
+    `<button onclick="khsxSetPage(${page})" ${disabled ? "disabled" : ""} style="padding:3px 10px;border:1px solid var(--line);border-radius:6px;background:var(--panel-2);color:var(--fg);cursor:${disabled ? "not-allowed" : "pointer"};opacity:${disabled ? "0.4" : "1"};font-size:12px">${label}</button>`;
+  pager.innerHTML =
+    btn("« Đầu", 1, khsxPage <= 1) +
+    btn("‹ Trước", khsxPage - 1, khsxPage <= 1) +
+    `<span style="font-size:12px;color:var(--muted)">Trang <b style="color:var(--fg)">${khsxPage}</b> / ${totalPages} · dòng ${from.toLocaleString()}–${to.toLocaleString()} / ${totalRows.toLocaleString()}</span>` +
+    btn("Sau ›", khsxPage + 1, khsxPage >= totalPages) +
+    btn("Cuối »", totalPages, khsxPage >= totalPages);
+}
+function khsxSetPage(p){
+  khsxPage = Math.max(1, p | 0);
+  renderKHSXDong();
+  const wrap = document.getElementById("khsxDongTableWrap");
+  if(wrap) wrap.scrollTop = 0;
+}
+window.khsxSetPage = khsxSetPage;
 
 /* Đóng băng (Freeze Panes) 8 cột đầu — tới cột "Hạn giao" — khi cuộn ngang xem các cột ngày.
    Đo bề rộng thực tế của tiêu đề rồi ghim sticky-left theo đúng vị trí từng cột. */
@@ -7187,6 +7229,7 @@ const elKhsxSearch = document.getElementById("khsxSearchInput");
 if(elKhsxSearch){
   elKhsxSearch.addEventListener("input", e => {
     khsxSearchQuery = (e.target.value || "").trim();
+    khsxPage = 1;
     renderKHSXDong();
   });
 }
@@ -7194,6 +7237,7 @@ const elKhsxZone = document.getElementById("khsxZoneFilter");
 if(elKhsxZone){
   elKhsxZone.addEventListener("change", e => {
     khsxZoneFilter = e.target.value;
+    khsxPage = 1;
     renderKHSXDong();
   });
 }
@@ -7208,6 +7252,7 @@ const elKhsxPriority = document.getElementById("khsxPriorityFilter");
 if(elKhsxPriority){
   elKhsxPriority.addEventListener("change", e => {
     khsxPriorityFilter = e.target.value;
+    khsxPage = 1;
     renderKHSXDong();
   });
 }
@@ -7215,6 +7260,7 @@ const elKhsxStatus = document.getElementById("khsxStatusFilter");
 if(elKhsxStatus){
   elKhsxStatus.addEventListener("change", e => {
     khsxStatusFilter = e.target.value;
+    khsxPage = 1;
     renderKHSXDong();
   });
 }
