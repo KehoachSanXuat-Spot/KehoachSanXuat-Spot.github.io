@@ -532,6 +532,23 @@ def _pa_save_actual(actuals, user_email):
     }
 
 
+def _pa_save_plan(updates, user_email):
+    """Gửi danh sách {part, planQty, priority, startDate, dueDate} cho flow -> Office Script ghi SoLuong/UuTien/BatDau/HanGiao."""
+    d = _pa_call("save_plan", {"email": user_email, "updates": updates}, timeout=90)
+    with _pa_lock:
+        _pa_meta_cache["at"] = 0.0
+    n = int(d.get("parts") or d.get("updated") or 0)
+    return {
+        "status": "ok",
+        "updated": int(d.get("updated") or 0),
+        "parts": n,
+        "missing": int(d.get("missing") or 0),
+        "mtime": _pa_parse_time(d.get("mtime") or ""),
+        "filename": PLAN_FILE_NAME,
+        "message": d.get("message") or ("Đã cập nhật Kế hoạch cho %d part lên SharePoint" % n),
+    }
+
+
 def _pa_save_khsx(headers, rows, user_email):
     """Gửi headers + rows cho flow -> Office Script ghi lại sheet KHSX_Dong."""
     d = _pa_call("save_khsx", {"email": user_email, "headers": headers, "rows": rows}, timeout=90)
@@ -574,55 +591,69 @@ def _plan_meta():
 #   backups/KeHoach_HanSpot_slot1.xlsx .. slot6.xlsx
 # Đến giờ tiếp theo sẽ tự động xoay vòng ghi đè lại vào slot 1..6.
 # ============================================================
+# Cấu hình sao lưu (đặt qua Environment trên Render):
+#   BACKUP_REPO         = "owner/ten-repo" nơi chứa thư mục backups/ (mặc định dò tự động)
+#   BACKUP_BRANCH       = nhánh (mặc định = PLAN_BRANCH hoặc "main")
+#   BACKUP_DIR          = thư mục trong repo (mặc định "backups")
+#   BACKUP_CHECK_SECONDS= chu kỳ worker kiểm tra (mặc định 600s = 10 phút)
+#   BACKUP_ENABLED      = "0" để tắt hẳn
+BACKUP_REPO = os.environ.get("BACKUP_REPO", "").strip()
+BACKUP_BRANCH = os.environ.get("BACKUP_BRANCH", "").strip() or PLAN_BRANCH or "main"
+BACKUP_DIR = (os.environ.get("BACKUP_DIR", "backups").strip() or "backups").strip("/")
+_BACKUP_ENABLED = os.environ.get("BACKUP_ENABLED", "1").strip() != "0"
+try:
+    BACKUP_CHECK_SECONDS = max(60, int(os.environ.get("BACKUP_CHECK_SECONDS", "600")))
+except ValueError:
+    BACKUP_CHECK_SECONDS = 600
+
 _last_backup_slot_key = None
 _last_backup_mtime = 0.0
 _working_backup_repo = None
 
 
 def _resolve_backup_repo():
-    """Tự động kiểm tra và chọn repo chính xác có quyền truy cập."""
+    """Chọn repo GitHub để lưu backup. Ưu tiên BACKUP_REPO, rồi PLAN_REPO,
+    rồi <login>/dieu-do-data. Trả None nếu không truy cập được repo nào
+    (để BỎ QUA sao lưu, tránh PUT vào repo đoán sai)."""
     global _working_backup_repo
     if _working_backup_repo:
         return _working_backup_repo
     if not GITHUB_TOKEN:
         return None
 
-    candidates = []
-    if PLAN_REPO:
-        candidates.append(PLAN_REPO)
+    candidates = [c for c in (BACKUP_REPO, PLAN_REPO) if c]
     try:
-        user_info = _gh_api("GET", "/user")
-        login = user_info.get("login")
+        login = (_gh_api("GET", "/user") or {}).get("login")
         if login:
             candidates.append(f"{login}/dieu-do-data")
     except Exception:
         pass
-
-    candidates.extend(["dungbu-eng/dieu-do-data", "KehoachSanXuat-Spot/dieu-do-data"])
+    candidates.append("KehoachSanXuat-Spot/dieu-do-data")
 
     seen = set()
     uniq = [c for c in candidates if c and not (c in seen or seen.add(c))]
-
     for cand in uniq:
         try:
             r = _gh_api("GET", f"/repos/{cand}")
             if r.get("id") or r.get("name"):
-                logger.info("[Rolling Backup] Da xac thuc thanh cong repo: %s", cand)
+                logger.info("[Rolling Backup] Dung repo sao luu: %s", cand)
                 _working_backup_repo = cand
                 return cand
-        except _uerr.HTTPError:
-            continue
         except Exception:
             continue
 
-    logger.warning("[Rolling Backup] Khong truy cap duoc repo nao trong %s. Kiem tra quyen GITHUB_TOKEN.", uniq)
-    return PLAN_REPO or "dungbu-eng/dieu-do-data"
+    logger.warning("[Rolling Backup] Khong truy cap duoc repo sao luu nao trong %s", uniq)
+    return None
 
 
 def _do_rolling_backup(force: bool = False):
-    """Kiểm tra và thực hiện sao lưu xoay vòng vào đúng slot (1..6) nếu có thay đổi."""
+    """Sao lưu file kế hoạch vào slot 1..6 (theo phút//10) nếu có thay đổi.
+    - force=True (gọi ngay sau khi lưu): luôn sao lưu bản vừa ghi.
+    - định kỳ: kiểm mtime nhẹ bằng _plan_meta() TRƯỚC; chỉ đọc toàn bộ file +
+      commit khi mtime thực sự tăng -> tránh đốt quota Power Automate/SharePoint
+      và tránh commit rác lúc không ai sửa (giờ nghỉ, ban đêm)."""
     global _last_backup_slot_key, _last_backup_mtime
-    if not GITHUB_TOKEN:
+    if not (_BACKUP_ENABLED and GITHUB_TOKEN):
         return
     repo = _resolve_backup_repo()
     if not repo:
@@ -633,25 +664,31 @@ def _do_rolling_backup(force: bool = False):
     slot = (now.minute // 10) + 1  # 1..6
     slot_key = (now.year, now.month, now.day, now.hour, slot)
 
+    # Lọc thông minh cho đường định kỳ: file chưa đổi -> bỏ qua, KHÔNG đọc full.
+    if not force:
+        try:
+            mtime_now = float(_plan_meta().get("mtime", 0.0) or 0.0)
+        except Exception as e:
+            logger.warning("[Rolling Backup] Khong doc duoc metadata: %s", e)
+            return
+        if _last_backup_mtime > 0 and mtime_now <= _last_backup_mtime:
+            return
+
+    # Cần sao lưu -> đọc toàn bộ file hiện tại
     try:
         content, mtime = _plan_read_bytes()
     except Exception as e:
         logger.warning("[Rolling Backup] Chua doc duoc file de sao luu: %s", e)
         return
+    if not content:
+        return
 
-    # Nếu không phải ép buộc và file chưa đổi mtime -> bỏ qua để tránh commit rác
-    if not force:
-        if slot_key == _last_backup_slot_key and mtime <= _last_backup_mtime:
-            return
-        if _last_backup_mtime > 0 and mtime <= _last_backup_mtime:
-            return
-
-    slot_filename = f"backups/KeHoach_HanSpot_slot{slot}.xlsx"
+    slot_filename = f"{BACKUP_DIR}/KeHoach_HanSpot_slot{slot}.xlsx"
     slot_q = _uparse.quote(slot_filename)
 
     sha = None
     try:
-        d = _gh_api("GET", f"/repos/{repo}/contents/{slot_q}?ref={_uparse.quote(PLAN_BRANCH)}")
+        d = _gh_api("GET", f"/repos/{repo}/contents/{slot_q}?ref={_uparse.quote(BACKUP_BRANCH)}")
         sha = d.get("sha")
     except Exception:
         sha = None
@@ -659,7 +696,7 @@ def _do_rolling_backup(force: bool = False):
     body = {
         "message": f"Auto backup slot {slot}/6 ({now.strftime('%H:%M %d/%m/%Y')})",
         "content": _b64.b64encode(content).decode("ascii"),
-        "branch": PLAN_BRANCH,
+        "branch": BACKUP_BRANCH,
     }
     if sha:
         body["sha"] = sha
@@ -667,24 +704,27 @@ def _do_rolling_backup(force: bool = False):
     try:
         _gh_api("PUT", f"/repos/{repo}/contents/{slot_q}", body)
         _last_backup_slot_key = slot_key
-        _last_backup_mtime = mtime
-        logger.info("[Rolling Backup] Da sao luu thanh cong slot %d/6 vao %s (%s)", slot, slot_filename, repo)
+        _last_backup_mtime = mtime or _last_backup_mtime
+        logger.info("[Rolling Backup] Da sao luu slot %d/6 -> %s (%s)", slot, slot_filename, repo)
     except Exception as e:
         logger.warning("[Rolling Backup] Loi luu slot %d vao %s: %s", slot, repo, e)
 
 
 def _rolling_backup_worker():
-    """Luồng chạy ngầm: định kỳ mỗi 60 giây kiểm tra mốc 10 phút để sao lưu."""
+    """Luồng chạy ngầm: cứ mỗi BACKUP_CHECK_SECONDS kiểm tra & sao lưu khi có đổi.
+    Lưu ý: trên Render gói free, dịch vụ ngủ khi rảnh -> luồng này chỉ chạy lúc
+    dịch vụ còn thức (tức lúc có người dùng = lúc dữ liệu có thể đổi). Thay đổi
+    QUA APP luôn được sao lưu tức thì nhờ _do_rolling_backup(force=True)."""
     time.sleep(30)
     while True:
         try:
             _do_rolling_backup()
         except Exception as e:
             logger.warning("[Rolling Backup Worker] Loi: %s", e)
-        time.sleep(60)
+        time.sleep(BACKUP_CHECK_SECONDS)
 
 
-if GITHUB_TOKEN:
+if _BACKUP_ENABLED and GITHUB_TOKEN:
     threading.Thread(target=_rolling_backup_worker, daemon=True).start()
 
 
@@ -1051,6 +1091,146 @@ def save_actual_endpoint(payload: SaveActualPayload, request: Request):
     except Exception:
         logger.exception("Loi ghi Thuc te vao Excel")
         raise HTTPException(status_code=500, detail="Khong ghi duoc Thuc te vao Excel (xem log server).")
+
+
+class SavePlanPayload(BaseModel):
+    filename: Optional[str] = "KeHoach_HanSpot_Tuan_Thang_Mau.xlsx"
+    updates: List[Dict[str, Any]]  # [{"part","planQty","priority","startDate","dueDate"}, ...]
+
+
+@app.post("/api/excel/save-plan")
+def save_plan_endpoint(payload: SavePlanPayload, request: Request):
+    """Ghi/cập nhật Kế hoạch (SoLuong), Ưu tiên, Bắt đầu, Hạn giao cho từng Part vào sheet kế hoạch."""
+    if CLOUD_MODE:
+        payload.filename = PLAN_FILE_NAME
+    elif not _is_same_origin_request(request):
+        raise HTTPException(status_code=403, detail="Chặn thao tác ghi dữ liệu từ nguồn lạ (CSRF)")
+
+    import re as _re
+    import unicodedata as _ud
+
+    def _norm(s):
+        s = _ud.normalize("NFD", str(s if s is not None else ""))
+        s = "".join(c for c in s if _ud.category(c) != "Mn")
+        return _re.sub(r"[^a-z0-9]", "", s.lower())
+
+    def _to_int(v, lo=0):
+        try:
+            return max(lo, int(round(float(v))))
+        except (ValueError, TypeError):
+            return None
+
+    want = {}
+    clean = []
+    for it in (payload.updates or []):
+        pt = it.get("part")
+        if pt is None:
+            continue
+        plan = _to_int(it.get("planQty"), 0)
+        pri = _to_int(it.get("priority"), 1)
+        if pri is not None:
+            pri = min(3, max(1, pri))
+        start = str(it.get("startDate") or "").strip()
+        due = str(it.get("dueDate") or "").strip()
+        want[_norm(pt)] = {"plan": plan, "pri": pri, "start": start, "due": due}
+        clean.append({
+            "part": str(pt),
+            "planQty": plan if plan is not None else 0,
+            "priority": pri if pri is not None else 2,
+            "startDate": start,
+            "dueDate": due,
+        })
+    if not want:
+        return {"status": "ok", "updated": 0, "message": "Không có dữ liệu để cập nhật"}
+
+    if USE_POWER_AUTOMATE:
+        try:
+            res = _pa_save_plan(clean, _req_email(request))
+            threading.Thread(target=lambda: (time.sleep(2), _do_rolling_backup(force=True)), daemon=True).start()
+            return res
+        except HTTPException:
+            raise
+        except Exception:
+            logger.exception("Loi ghi Ke hoach qua Power Automate")
+            raise HTTPException(status_code=502, detail="Khong ghi duoc Ke hoach len SharePoint (xem log server).")
+
+    QTY_ALIASES   = ("soluong", "qty", "quantity", "sl", "kehoach", "kh")
+    PRI_ALIASES   = ("uutien", "priority", "capdo", "cap", "muc")
+    START_ALIASES = ("batdau", "start", "ngaybatdau", "ngaybd")
+    DUE_ALIASES   = ("hangiao", "duedate", "deadline", "han", "ngaygiao")
+
+    def _apply(wb):
+        total_cells = 0
+        updated_parts = set()
+        sheets_touched = []
+        for sn in wb.sheetnames:
+            ws = wb[sn]
+            header_row = part_col = None
+            qty_col = pri_col = start_col = due_col = None
+            max_scan = min(6, ws.max_row or 1)
+            for r in range(1, max_scan + 1):
+                cols = {}
+                for c in range(1, (ws.max_column or 1) + 1):
+                    v = _norm(ws.cell(row=r, column=c).value)
+                    if v:
+                        cols[c] = v
+                pc = next((c for c, v in cols.items() if v == "part"), None)
+                if pc is not None:
+                    header_row, part_col = r, pc
+                    qty_col   = next((c for c, v in cols.items() if v in QTY_ALIASES), None)
+                    pri_col   = next((c for c, v in cols.items() if v in PRI_ALIASES), None)
+                    start_col = next((c for c, v in cols.items() if v in START_ALIASES), None)
+                    due_col   = next((c for c, v in cols.items() if v in DUE_ALIASES), None)
+                    break
+            if header_row is None or part_col is None:
+                continue
+            if not (qty_col or pri_col or start_col or due_col):
+                continue
+            for r in range(header_row + 1, (ws.max_row or header_row) + 1):
+                pv = _norm(ws.cell(row=r, column=part_col).value)
+                if not (pv and pv in want):
+                    continue
+                u = want[pv]
+                row_touched = 0
+                if qty_col and u["plan"] is not None:
+                    ws.cell(row=r, column=qty_col, value=u["plan"]); row_touched += 1
+                if pri_col and u["pri"] is not None:
+                    ws.cell(row=r, column=pri_col, value=u["pri"]); row_touched += 1
+                if start_col and u["start"]:
+                    ws.cell(row=r, column=start_col, value=u["start"]); row_touched += 1
+                if due_col and u["due"]:
+                    ws.cell(row=r, column=due_col, value=u["due"]); row_touched += 1
+                if row_touched:
+                    updated_parts.add(pv)
+                    total_cells += row_touched
+            if sn not in sheets_touched and updated_parts:
+                sheets_touched.append(sn)
+        missing = [pp for pp in want if pp not in updated_parts]
+        msg = "Đã cập nhật Kế hoạch cho %d part (%d ô)" % (len(updated_parts), total_cells)
+        if missing:
+            msg += "; %d part không tìm thấy trong file" % len(missing)
+        return {
+            "status": "ok",
+            "updated": total_cells,
+            "parts": len(updated_parts),
+            "sheets": sheets_touched,
+            "missing": len(missing),
+            "message": msg,
+        }
+
+    try:
+        if USE_GITHUB:
+            res = _mutate_plan_workbook(_req_email(request), _apply)
+        else:
+            safe_name, fp = _get_safe_excel_path(payload.filename or "KeHoach_HanSpot_Tuan_Thang_Mau.xlsx", must_exist=True)
+            res = _mutate_plan_workbook(_req_email(request), _apply, local_path=fp)
+        threading.Thread(target=lambda: (time.sleep(2), _do_rolling_backup(force=True)), daemon=True).start()
+        return res
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Loi ghi Ke hoach vao Excel")
+        raise HTTPException(status_code=500, detail="Khong ghi duoc Ke hoach vao Excel (xem log server).")
 
 
 class ExportSchedulePayload(BaseModel):
