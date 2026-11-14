@@ -13,7 +13,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="./assets/app.css?v=d4672cccdc">
+<link rel="stylesheet" href="./assets/app.css?v=mobilefix02">
 
 <div id="authGate">
   <div class="agcard">
@@ -293,31 +293,51 @@
         <div class="stage">
           <div class="pane" id="pane-three">
             <canvas id="three"></canvas>
+            <!-- Nút thoát Fullscreen 3D nổi ở góc trên bên trái -->
+            <div id="threeTopControls" style="position:absolute;left:10px;top:10px;display:flex;align-items:center;gap:6px;z-index:35;pointer-events:auto">
+              <button type="button" id="btnExit3DFs" onclick="exit3DFullscreen()" style="display:none;padding:6px 12px;font-size:12px;font-weight:700;background:#ef4444;color:#fff;border:none;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.45);cursor:pointer">✕ Thoát Full</button>
+              <button type="button" id="btnAutoRotate3D" onclick="toggleAutoRotate3D()" style="padding:5px 10px;font-size:11.5px;font-weight:600;background:rgba(15,23,42,0.88);border:1px solid #38bdf8;color:#38bdf8;border-radius:7px;cursor:pointer;backdrop-filter:blur(6px)" title="Bật/tắt tự động xoay 360° quanh xưởng">🔄 Tự xoay</button>
+              <div style="display:inline-flex;align-items:center;background:rgba(15,23,42,0.88);border:1px solid rgba(255,255,255,0.2);border-radius:7px;padding:1px 3px;backdrop-filter:blur(6px)">
+                <button type="button" onclick="zoom3DBy(1.18)" style="padding:3px 8px;font-size:12px;font-weight:700;background:transparent;color:#e2e8f0;border:none;cursor:pointer" title="Thu nhỏ 3D">➖</button>
+                <button type="button" onclick="zoom3DBy(0.84)" style="padding:3px 8px;font-size:12px;font-weight:700;background:transparent;color:#e2e8f0;border:none;cursor:pointer" title="Phóng to 3D">➕</button>
+              </div>
+              <button type="button" id="btnFullscreen3D" onclick="toggle3DFullscreen()" style="padding:5px 9px;font-size:11.5px;font-weight:600;background:rgba(29,78,216,0.92);border:1px solid #60a5fa;color:#fff;border-radius:7px;cursor:pointer" title="Xem 3D toàn màn hình (xoay ngang trên điện thoại)">⛶ Full</button>
+            </div>
             <div class="legend3d">
               <div><i style="background:var(--hot)"></i>Đang hàn</div>
               <div><i style="background:var(--accent)"></i>Chờ việc</div>
               <div><i style="background:var(--muted)"></i>Rảnh</div>
             </div>
-            <div class="hint" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;background:rgba(15,23,42,0.92);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.15);padding:6px 12px;border-radius:8px;font-size:11px;color:#e2e8f0;pointer-events:auto;z-index:20">
+            <div class="hint" id="threeBottomHint" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;background:rgba(15,23,42,0.92);backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,0.15);padding:6px 12px;border-radius:8px;font-size:11px;color:#e2e8f0;pointer-events:auto;z-index:20">
               <div style="display:flex;align-items:center;gap:8px">
-                <span>🖱️ Kiểu Onshape: Chuột Phải = Xoay · Ctrl + Chuột Phải (hoặc Chuột Giữa) = Pan · Lăn = Zoom về con trỏ</span>
-                <button type="button" class="btn" onclick="fitView3D()" style="padding:2px 8px;font-size:11px;background:#3b82f6;color:#fff;border-radius:4px;cursor:pointer;border:none;font-weight:600">🎯 Fit View</button>
+                <span class="desktop-hint-text">🖱️ Kiểu Onshape: Chuột Phải = Xoay · Ctrl + Chuột Phải (hoặc Chuột Giữa) = Pan · Lăn = Zoom về con trỏ</span>
+                <button type="button" class="btn" onclick="fitView3D()" style="padding:3px 8px;font-size:11px;background:#3b82f6;color:#fff;border-radius:4px;cursor:pointer;border:none;font-weight:600;white-space:nowrap">🎯 Fit View</button>
               </div>
-              <div style="display:flex;align-items:center;gap:4px">
-                <span style="color:#94a3b8;font-size:11px;font-weight:600">🎥 Góc nhìn:</span>
-                <button type="button" class="btn" onclick="setCameraPreset('overview')" style="padding:2px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer" title="Toàn cảnh nhà xưởng">🌐 Toàn cảnh</button>
-                <button type="button" class="btn" onclick="setCameraPreset('topdown')" style="padding:2px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer" title="Nhìn vuông góc từ trên xuống">📐 Mặt bằng</button>
-                <button type="button" class="btn" onclick="setCameraPreset('l1')" style="padding:2px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer" title="Cụm máy hàn bu lông L1">⚡ Cụm L1</button>
-                <button type="button" class="btn" onclick="setCameraPreset('l2')" style="padding:2px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer" title="Cụm súng hàn treo L2">🔧 Cụm L2</button>
-                <button type="button" class="btn" onclick="setCameraPreset('l3')" style="padding:2px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer" title="Cụm máy hàn C-frame L3">🏗 Cụm L3</button>
-                <button type="button" class="btn" onclick="setCameraPreset('worker')" style="padding:2px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer" title="Góc nhìn ngang tầm mắt công nhân">👤 Tầm mắt</button>
+              <div class="preset-bar-3d" style="display:flex;align-items:center;gap:4px">
+                <span class="desktop-hint-text" style="color:#94a3b8;font-size:11px;font-weight:600">🎥 Góc nhìn:</span>
+                <button type="button" class="btn" onclick="setCameraPreset('overview')" style="padding:3px 8px;font-size:11px;background:#0284c7;border:1px solid #38bdf8;color:#fff;border-radius:4px;cursor:pointer;font-weight:700;white-space:nowrap" title="Toàn cảnh giữa khung hình, tự động xoay & full màn hình">🌐 Toàn cảnh</button>
+                <button type="button" class="btn" onclick="setCameraPreset('topdown')" style="padding:3px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer;white-space:nowrap" title="Nhìn vuông góc từ trên xuống">📐 Mặt bằng</button>
+                <button type="button" class="btn" onclick="setCameraPreset('l1')" style="padding:3px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer;white-space:nowrap" title="Cụm máy hàn bu lông L1">⚡ Cụm L1</button>
+                <button type="button" class="btn" onclick="setCameraPreset('l2')" style="padding:3px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer;white-space:nowrap" title="Cụm súng hàn treo L2">🔧 Cụm L2</button>
+                <button type="button" class="btn" onclick="setCameraPreset('l3')" style="padding:3px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer;white-space:nowrap" title="Cụm máy hàn C-frame L3">🏗 Cụm L3</button>
+                <button type="button" class="btn" onclick="setCameraPreset('worker')" style="padding:3px 7px;font-size:11px;background:#1e293b;border:1px solid #475569;color:#e2e8f0;border-radius:4px;cursor:pointer;white-space:nowrap" title="Góc nhìn ngang tầm mắt công nhân">👤 Tầm mắt</button>
               </div>
             </div>
           </div>
           <div class="pane" id="pane-gantt" hidden style="position:relative">
             <canvas id="gantt"></canvas>
+            <!-- Thanh điều khiển Phóng to / Thu nhỏ & Full màn hình cho Gantt -->
+            <div id="ganttTopControls" style="position:absolute;right:10px;top:6px;display:flex;align-items:center;gap:4px;z-index:35;background:rgba(15,23,42,0.9);border:1px solid rgba(59,130,246,0.45);border-radius:7px;padding:2px 6px;backdrop-filter:blur(6px)">
+              <button type="button" id="btnExitGanttFs" onclick="exitGanttFullscreen()" style="display:none;padding:3px 8px;font-size:11px;font-weight:700;background:#ef4444;color:#fff;border:none;border-radius:5px;cursor:pointer">✕ Thoát Full</button>
+              <span style="font-size:10px;color:#93c5fd">🔍</span>
+              <button type="button" onclick="adjustGanttZoom(0.8)" style="padding:2px 7px;font-size:11.5px;font-weight:700;background:transparent;color:#e2e8f0;border:none;cursor:pointer" title="Thu nhỏ lịch Gantt">➖</button>
+              <span id="ganttZoomLbl" style="font-size:10.5px;font-weight:700;color:#38bdf8;min-width:34px;text-align:center">100%</span>
+              <button type="button" onclick="adjustGanttZoom(1.25)" style="padding:2px 7px;font-size:11.5px;font-weight:700;background:transparent;color:#e2e8f0;border:none;cursor:pointer" title="Phóng to lịch Gantt">➕</button>
+              <button type="button" onclick="resetGanttView()" style="padding:2px 6px;font-size:10.5px;background:rgba(255,255,255,0.08);color:#cbd5e1;border:none;border-radius:4px;cursor:pointer" title="Đặt lại 100%">↺</button>
+              <button type="button" id="btnFullscreenGantt" onclick="toggleGanttFullscreen()" style="padding:2px 7px;font-size:10.5px;font-weight:600;background:#1d4ed8;color:#fff;border:none;border-radius:4px;cursor:pointer" title="Toàn màn hình lịch Gantt">⛶ Full</button>
+            </div>
             <div id="ganttTooltip" style="position:absolute;display:none;pointer-events:none;background:rgba(15,23,42,0.96);border:1px solid #3b82f6;color:#f8fafc;padding:8px 11px;border-radius:6px;font-size:11px;line-height:1.5;z-index:100;box-shadow:0 6px 16px rgba(0,0,0,0.6);backdrop-filter:blur(4px);min-width:200px"></div>
-            <div class="hint">Rê chuột tra cứu chi tiết từng thao tác · Vạch cam = thời điểm mô phỏng</div>
+            <div class="hint"><span class="desktop-hint-text">Rê chuột tra cứu chi tiết · Lăn chuột để Zoom · </span>Chụm 2 ngón để Phóng to · Vuốt 1 ngón để kéo lịch · Chạm vào lô để xem chi tiết</div>
           </div>
           <div class="pane" id="pane-khsxDong" hidden style="padding:12px;overflow:auto;height:100%;box-sizing:border-box;background:var(--panel)">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px">
@@ -528,6 +548,15 @@
               </button>
             </div>
           </div>
+
+          <!-- Cụm nút Phóng to / Thu nhỏ nổi trên di động cho các tab Bảng dữ liệu -->
+          <div id="mobileZoomPill" style="display:none;position:absolute;right:10px;bottom:10px;z-index:45;align-items:center;gap:4px;background:rgba(15,23,42,0.92);border:1px solid #38bdf8;border-radius:20px;padding:4px 8px;box-shadow:0 4px 14px rgba(0,0,0,0.5);backdrop-filter:blur(6px)">
+            <span style="font-size:11px;color:#38bdf8">🔍</span>
+            <button type="button" onclick="adjustTableZoom(-0.12)" style="padding:2px 8px;font-size:13px;font-weight:700;background:transparent;color:#fff;border:none;cursor:pointer">➖</button>
+            <span class="zoomLevelLbl" style="font-size:11px;font-weight:700;color:#38bdf8;min-width:36px;text-align:center">100%</span>
+            <button type="button" onclick="adjustTableZoom(0.12)" style="padding:2px 8px;font-size:13px;font-weight:700;background:transparent;color:#fff;border:none;cursor:pointer">➕</button>
+            <button type="button" onclick="adjustTableZoom(0, true)" style="padding:2px 6px;font-size:10px;background:rgba(255,255,255,0.12);color:#cbd5e1;border:none;border-radius:10px;cursor:pointer">↺</button>
+          </div>
         </div>
         <div class="transport">
           <button class="play" id="playBtn">▶</button>
@@ -590,9 +619,9 @@
   <footer>Bộ lập lịch heuristic client-side · để lấy lịch tối ưu dùng mô hình OR-Tools CP-SAT (file Python kèm theo)</footer>
 </div>
 
-<script>window.APP_BUILD_ID="mobilefix01";</script>
+<script>window.APP_BUILD_ID="mobilefix02";</script>
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.10.0/lib/msal-browser.min.js" integrity="sha384-yXVL3cgcbuPa1TOmTYdr5MVOeFWnnXoYXcSIPBJ4lrnGHn8EZrbyurhG/xZMygBB" crossorigin="anonymous"></script>
-<script src="./config.js?v=mobilefix01"></script>
-<script src="./auth.js?v=mobilefix01"></script>
-<script src="./api-shim.js?v=mobilefix01"></script>
-<script src="./gate.js?v=mobilefix01"></script>
+<script src="./config.js?v=mobilefix02"></script>
+<script src="./auth.js?v=mobilefix02"></script>
+<script src="./api-shim.js?v=mobilefix02"></script>
+<script src="./gate.js?v=mobilefix02"></script>
