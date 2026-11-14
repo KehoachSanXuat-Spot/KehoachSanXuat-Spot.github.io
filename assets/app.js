@@ -1642,39 +1642,225 @@ let renderer,scene,camera,machineMeshes=[],partCubes=[],threeReady=false;
 // Trần pixel-ratio thích ứng: bắt đầu 2.0, tự hạ khi FPS thấp (chạy mượt máy yếu)
 let PIXEL_CAP = 2.0;
 let _fpsSmooth = 60, _gfxFrames = 0, _gfxDownshifts = 0;
-let orbit={az:-0.6,el:0.95,r:1,cx:0,cy:0,cz:0,drag:false,dragMode:"rotate",px:0,py:0};
+let orbit={az:-0.65,el:0.78,r:110,cx:0,cy:0,cz:0,drag:false,dragMode:"rotate",px:0,py:0};
+let factoryBounds = { minX: -45, maxX: 45, minZ: -30, maxZ: 30, midX: 0, midZ: 0, width: 90, depth: 60 };
+let autoRotate3D = false;
+
+function computeFitRadius3D(boxW, boxD, az, el, forTurntable){
+  const aspect = (camera && camera.aspect > 0.05) ? camera.aspect : 1.5;
+  const fovRad = ((camera ? camera.fov : 40) * Math.PI) / 180;
+  const tanV = Math.tan(fovRad / 2);
+  const tanH = Math.max(0.15, aspect * tanV);
+  const w = Math.max(24, boxW || 80);
+  const d = Math.max(20, boxD || 55);
+  let spanH, spanV;
+  if(forTurntable){
+    const diag = Math.hypot(w, d) * 0.85;
+    spanH = diag;
+    spanV = diag * Math.sin(el) + 14 * Math.cos(el);
+  } else {
+    const cAz = Math.abs(Math.cos(az)), sAz = Math.abs(Math.sin(az));
+    spanH = w * cAz + d * sAz;
+    spanV = (w * sAz + d * cAz) * Math.sin(el) + 14 * Math.cos(el);
+  }
+  const rH = (spanH * 0.5) / tanH;
+  const rV = (spanV * 0.5) / tanV;
+  return Math.max(32, Math.min(480, Math.max(rH, rV) * 1.06));
+}
+
+function computeClusterBounds3D(filterFn){
+  const matched = machineMeshes.filter(m => filterFn(m));
+  if(!matched.length) return { cx: factoryBounds.midX, cz: factoryBounds.midZ, w: factoryBounds.width * 0.5, d: factoryBounds.depth * 0.5 };
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  matched.forEach(m => {
+    const x = m.g ? m.g.position.x : (m.cx || 0);
+    const z = m.g ? m.g.position.z : (m.cz || 0);
+    minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+  });
+  return {
+    cx: (minX + maxX) / 2,
+    cz: (minZ + maxZ) / 2,
+    w: Math.max(26, (maxX - minX) + 18),
+    d: Math.max(22, (maxZ - minZ) + 18)
+  };
+}
+
+function setAutoRotate3D(on){
+  autoRotate3D = !!on;
+  const btn = document.getElementById("btnAutoRotate3D");
+  if(btn){
+    btn.textContent = autoRotate3D ? "🔄 Đang xoay" : "🔄 Tự xoay";
+    btn.style.background = autoRotate3D ? "#0284c7" : "rgba(15,23,42,0.88)";
+    btn.style.color = autoRotate3D ? "#ffffff" : "#38bdf8";
+  }
+}
+function toggleAutoRotate3D(){
+  setAutoRotate3D(!autoRotate3D);
+}
+window.setAutoRotate3D = setAutoRotate3D;
+window.toggleAutoRotate3D = toggleAutoRotate3D;
+
+function zoom3DBy(factor){
+  targetOrbit = null;
+  orbit.r = Math.max(12, Math.min(520, orbit.r * factor));
+  if(typeof renderThree === "function") renderThree();
+}
+window.zoom3DBy = zoom3DBy;
+
+function sync3DFsOrientation(){
+  const pane = document.getElementById("pane-three");
+  if(!pane) return;
+  const isFs = pane.classList.contains("three-fs") || pane.classList.contains("three-landscape-fs") ||
+               document.fullscreenElement === pane || document.webkitFullscreenElement === pane;
+  const exitBtn = document.getElementById("btnExit3DFs");
+  const fsBtn = document.getElementById("btnFullscreen3D");
+  if(exitBtn) exitBtn.style.display = isFs ? "inline-block" : "none";
+  if(fsBtn) fsBtn.textContent = isFs ? "✕ Thoát Full" : "⛶ Full";
+
+  if(isFs){
+    const isPortraitMobile = window.innerWidth <= 900 && window.innerWidth < window.innerHeight;
+    if(isPortraitMobile){
+      pane.classList.remove("three-fs");
+      pane.classList.add("three-landscape-fs");
+    } else {
+      pane.classList.remove("three-landscape-fs");
+      pane.classList.add("three-fs");
+    }
+  }
+  resizeThree();
+}
+
+function enter3DFullscreen(){
+  const pane = document.getElementById("pane-three");
+  if(!pane) return;
+  pane.classList.add("three-fs");
+  if(pane.requestFullscreen && window.innerWidth > 900){
+    pane.requestFullscreen().catch(()=>{});
+  } else if(screen.orientation && screen.orientation.lock && window.innerWidth <= 900){
+    screen.orientation.lock("landscape").catch(()=>{});
+  }
+  sync3DFsOrientation();
+  setTimeout(sync3DFsOrientation, 80);
+}
+
+function exit3DFullscreen(){
+  const pane = document.getElementById("pane-three");
+  if(pane){
+    pane.classList.remove("three-fs");
+    pane.classList.remove("three-landscape-fs");
+  }
+  if(document.fullscreenElement || document.webkitFullscreenElement){
+    if(document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+    else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
+  }
+  if(screen.orientation && screen.orientation.unlock){
+    try { screen.orientation.unlock(); } catch(e){}
+  }
+  const exitBtn = document.getElementById("btnExit3DFs");
+  const fsBtn = document.getElementById("btnFullscreen3D");
+  if(exitBtn) exitBtn.style.display = "none";
+  if(fsBtn) fsBtn.textContent = "⛶ Full";
+  resizeThree();
+  setTimeout(() => {
+    resizeThree();
+    orbit.r = computeFitRadius3D(factoryBounds.width, factoryBounds.depth, orbit.az, orbit.el, autoRotate3D);
+    if(typeof renderThree === "function") renderThree();
+  }, 80);
+}
+
+function toggle3DFullscreen(){
+  const pane = document.getElementById("pane-three");
+  if(!pane) return;
+  const isFs = pane.classList.contains("three-fs") || pane.classList.contains("three-landscape-fs") ||
+               document.fullscreenElement === pane || document.webkitFullscreenElement === pane;
+  if(isFs) exit3DFullscreen();
+  else {
+    enter3DFullscreen();
+    setTimeout(() => {
+      orbit.cx = factoryBounds.midX;
+      orbit.cz = factoryBounds.midZ;
+      orbit.r = computeFitRadius3D(factoryBounds.width, factoryBounds.depth, orbit.az, orbit.el, autoRotate3D);
+      if(typeof renderThree === "function") renderThree();
+    }, 90);
+  }
+}
+window.enter3DFullscreen = enter3DFullscreen;
+window.exit3DFullscreen = exit3DFullscreen;
+window.toggle3DFullscreen = toggle3DFullscreen;
 
 function fitView3D(){
-  setCameraPreset("overview");
+  setCameraPreset("overview", { noFullscreen: true, keepRotate: true });
 }
 window.fitView3D = fitView3D;
 
 let targetOrbit = null;
-function setCameraPreset(preset){
+function setCameraPreset(preset, opts){
   if(!threeReady) return;
-  const numM = (model && model.machines) ? model.machines.length : 25;
-  const defaultR = Math.max(50, Math.min(280, numM * 4.2 + 40));
-
-  let tOrbit = { cx: 30, cy: 0, cz: 18, az: -0.65, el: 0.82, r: 135 };
+  const options = opts || {};
 
   if(preset === "overview"){
-    // Toàn cảnh nhà xưởng (Isometric Overview)
-    tOrbit = { cx: 30, cy: 0, cz: 18, az: -0.65, el: 0.82, r: 135 };
-  } else if(preset === "topdown"){
-    // Nhìn thẳng từ trên trần xuống sàn (2D Layout Floor Plan)
-    tOrbit = { cx: 30, cy: 0, cz: 18, az: 0, el: 1.54, r: 120 };
+    // Khi bấm nút "🌐 Toàn cảnh": Tự động vào chính giữa khung hình, bật xoay 360° ngay lập tức & mở Full màn hình
+    if(!options.noFullscreen){
+      enter3DFullscreen();
+    }
+    if(!options.keepRotate){
+      setAutoRotate3D(true);
+    }
+    const applyOverviewTarget = () => {
+      resizeThree();
+      const az = autoRotate3D ? orbit.az : -0.65;
+      const el = 0.78;
+      const fitR = computeFitRadius3D(factoryBounds.width, factoryBounds.depth, az, el, true);
+      targetOrbit = { cx: factoryBounds.midX, cy: 0, cz: factoryBounds.midZ, az, el, r: fitR };
+      animateCameraTransition();
+    };
+    applyOverviewTarget();
+    if(!options.noFullscreen){
+      setTimeout(applyOverviewTarget, 100);
+    }
+    return;
+  }
+
+  // Các góc nhìn chuyên biệt khác: tắt tự xoay để đứng yên quan sát chi tiết cụm máy
+  setAutoRotate3D(false);
+  let tOrbit = {
+    cx: factoryBounds.midX,
+    cy: 0,
+    cz: factoryBounds.midZ,
+    az: -0.65,
+    el: 0.78,
+    r: computeFitRadius3D(factoryBounds.width, factoryBounds.depth, -0.65, 0.78, false)
+  };
+
+  if(preset === "topdown"){
+    // Nhìn thẳng vuông góc từ trên trần xuống chính giữa mặt bằng nhà xưởng
+    tOrbit = {
+      cx: factoryBounds.midX,
+      cy: 0,
+      cz: factoryBounds.midZ,
+      az: 0,
+      el: 1.54,
+      r: computeFitRadius3D(factoryBounds.width, factoryBounds.depth, 0, 1.54, false)
+    };
   } else if(preset === "l1"){
-    // Cụm L1: Máy hàn tán bu lông, đai ốc (Z=36, X=0..70)
-    tOrbit = { cx: 35, cy: 0, cz: 36, az: -0.3, el: 0.65, r: 65 };
+    const b = computeClusterBounds3D(m => /^l1|bulong|tan/i.test(m.name) || m.mType === "bulong");
+    tOrbit = { cx: b.cx, cy: 0, cz: b.cz, az: -0.35, el: 0.65, r: computeFitRadius3D(b.w, b.d, -0.35, 0.65, false) };
   } else if(preset === "l2"){
-    // Cụm L2: Súng hàn cầm tay treo balancer, máy pedestal (Z=18, X=0..60)
-    tOrbit = { cx: 30, cy: 0, cz: 18, az: -0.3, el: 0.65, r: 65 };
+    const b = computeClusterBounds3D(m => /^l2|camtay|treo/i.test(m.name) || m.mType === "camtay");
+    tOrbit = { cx: b.cx, cy: 0, cz: b.cz, az: -0.35, el: 0.65, r: computeFitRadius3D(b.w, b.d, -0.35, 0.65, false) };
   } else if(preset === "l3"){
-    // Cụm L3: Cụm máy hàn C-frame công suất lớn 100-150kVA (Z=0, X=0..60)
-    tOrbit = { cx: 30, cy: 0, cz: 0, az: -0.3, el: 0.65, r: 65 };
+    const b = computeClusterBounds3D(m => /^l3|spot/i.test(m.name) || m.mType === "to" || m.mType === "trungbinh");
+    tOrbit = { cx: b.cx, cy: 0, cz: b.cz, az: -0.35, el: 0.65, r: computeFitRadius3D(b.w, b.d, -0.35, 0.65, false) };
   } else if(preset === "worker"){
-    // Góc nhìn ngang tầm mắt người vận hành từ lối đi chính
-    tOrbit = { cx: 25, cy: -2, cz: 18, az: -1.57, el: 0.18, r: 35 };
+    tOrbit = {
+      cx: factoryBounds.midX,
+      cy: -1.5,
+      cz: factoryBounds.midZ,
+      az: -1.57,
+      el: 0.18,
+      r: Math.max(28, factoryBounds.width * 0.42)
+    };
   }
 
   targetOrbit = tOrbit;
@@ -1684,7 +1870,7 @@ window.setCameraPreset = setCameraPreset;
 
 function animateCameraTransition(){
   if(!targetOrbit) return;
-  const lerpSpeed = 0.14;
+  const lerpSpeed = 0.16;
   orbit.cx += (targetOrbit.cx - orbit.cx) * lerpSpeed;
   orbit.cy += (targetOrbit.cy - orbit.cy) * lerpSpeed;
   orbit.cz += (targetOrbit.cz - orbit.cz) * lerpSpeed;
@@ -3449,11 +3635,19 @@ function buildMachines(){
     isNutBoltAgv: true
   });
 
-  // tâm + bán kính để camera fit toàn bộ các phân khu + hệ thống kho
-  let ext = 10;
-  machineMeshes.forEach(m => ext = Math.max(ext, Math.abs(m.g.position.x), Math.abs(m.g.position.z)));
-  warehouseNodes.forEach(w => ext = Math.max(ext, Math.abs(w.wx) + 6, Math.abs(w.wz) + 6));
-  orbit.cx = 0; orbit.cz = 0; orbit.r = ext * 2.05 + 24;
+  // Lưu tọa độ ranh giới thực tế của toàn bộ nhà xưởng & kho để căn chính giữa khung hình
+  factoryBounds = {
+    minX: fx1, maxX: fx2,
+    minZ: fz1, maxZ: fz2,
+    midX: midFactoryX,
+    midZ: midFactoryZ,
+    width: wFactory,
+    depth: dFactory
+  };
+  orbit.cx = midFactoryX;
+  orbit.cy = 0;
+  orbit.cz = midFactoryZ;
+  orbit.r = computeFitRadius3D(wFactory, dFactory, orbit.az, orbit.el, autoRotate3D);
 
   // Nền không gian bên ngoài nhà xưởng: Luôn là màu nền ứng dụng (Dark / Light theme)
   const floorOld = scene.getObjectByName("floor"); if(floorOld) scene.remove(floorOld);
@@ -3462,7 +3656,7 @@ function buildMachines(){
     roughness: 1.0,
     metalness: 0.05
   });
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(orbit.r * 4.5, orbit.r * 4.5), outerFloorMat);
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(orbit.r * 5.0, orbit.r * 5.0), outerFloorMat);
   floor.rotation.x = -Math.PI / 2;
   floor.position.set(orbit.cx, -0.01, orbit.cz);
   floor.name = "floor";
@@ -3516,73 +3710,134 @@ function makeSparkTexture(){
   const t=new THREE.CanvasTexture(c); return t;
 }
 function bindOrbit(canvas){
-  // Chặn contextmenu và kéo rê mặc định trên canvas
   canvas.addEventListener("contextmenu", e => e.preventDefault());
-  canvas.style.touchAction = "none"; // Bắt buộc để nhận Pointer Events mượt mà
+  canvas.style.touchAction = "none";
 
   let lastClickTime = 0;
+  let lastClickX = 0, lastClickY = 0;
+  const activePointers = new Map();
+  let prevPinchDist = 0;
+  let prevPinchMidX = 0, prevPinchMidY = 0;
+
+  // Chuyển đổi tọa độ chạm khi màn hình 3D đang ở chế độ xoay ngang 90° trên điện thoại cầm dọc
+  function getLogicalXY(e){
+    const pane = document.getElementById("pane-three");
+    if(pane && pane.classList.contains("three-landscape-fs")){
+      return { x: e.clientY, y: window.innerWidth - e.clientX };
+    }
+    return { x: e.clientX, y: e.clientY };
+  }
+
+  function applyPanDelta(dx, dy){
+    const panFactor = orbit.r * 0.0016;
+    const sinAz = Math.sin(orbit.az);
+    const cosAz = Math.cos(orbit.az);
+    orbit.cx -= (dx * cosAz + dy * sinAz * Math.sin(orbit.el)) * panFactor;
+    orbit.cz += (dx * sinAz - dy * cosAz * Math.sin(orbit.el)) * panFactor;
+    orbit.cy = (orbit.cy || 0) + dy * Math.cos(orbit.el) * panFactor;
+  }
 
   const onPointerDown = e => {
-    // Ngăn chặn triệt để tính năng Auto-Scroll của trình duyệt Windows khi bấm chuột giữa hoặc chuột phải
     e.preventDefault();
     try { canvas.setPointerCapture(e.pointerId); } catch(err){}
+    targetOrbit = null;
 
-    orbit.px = e.clientX;
-    orbit.py = e.clientY;
+    const pt = getLogicalXY(e);
+    activePointers.set(e.pointerId, pt);
+
+    if(activePointers.size === 2){
+      // 2 ngón tay trên điện thoại: Chụm/tách để Phóng to/Thu nhỏ (Pinch Zoom) + Kéo 2 ngón để Pan
+      const pts = Array.from(activePointers.values());
+      prevPinchDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+      prevPinchMidX = (pts[0].x + pts[1].x) / 2;
+      prevPinchMidY = (pts[0].y + pts[1].y) / 2;
+      orbit.drag = true;
+      orbit.dragMode = "pinch";
+      return;
+    }
+
+    orbit.px = pt.x;
+    orbit.py = pt.y;
     orbit.drag = true;
 
-    // Phân loại nút chuột theo chuẩn Onshape (cad.onshape.com):
-    // e.button: 0 = Trái, 1 = Giữa, 2 = Phải
     if(e.button === 2){
-      // Chuột PHẢI = Xoay (Rotate/Orbit) — giống Onshape. Ctrl/Shift + Phải = Pan.
       orbit.dragMode = (e.ctrlKey || e.shiftKey) ? "pan" : "rotate";
     } else if(e.button === 1){
-      // Chuột GIỮA = Pan (dời khung nhìn). Ctrl + Giữa = Zoom.
       orbit.dragMode = e.ctrlKey ? "zoom" : "pan";
     } else {
-      // Chuột TRÁI = Xoay (tiện cho người dùng thường). Shift/Ctrl + Trái = Pan.
       orbit.dragMode = (e.shiftKey || e.ctrlKey) ? "pan" : "rotate";
     }
 
-    // Double click MB2 (hoặc MB1) -> Fit View toàn xưởng
+    // Chạm đúp 1 ngón (hoặc Double-click chuột) -> Fit View về giữa khung hình
     const now = performance.now();
-    if(now - lastClickTime < 280 && (e.button === 1 || e.button === 0 || e.button === 2)){
+    if(activePointers.size === 1 && now - lastClickTime < 280 && Math.hypot(pt.x - lastClickX, pt.y - lastClickY) < 28){
       fitView3D();
       orbit.drag = false;
     }
     lastClickTime = now;
+    lastClickX = pt.x;
+    lastClickY = pt.y;
   };
 
   const onPointerMove = e => {
-    if(!orbit.drag) return;
+    if(!activePointers.has(e.pointerId) && !orbit.drag) return;
     e.preventDefault();
+    const pt = getLogicalXY(e);
+    if(activePointers.has(e.pointerId)){
+      activePointers.set(e.pointerId, pt);
+    }
 
-    const dx = e.clientX - orbit.px;
-    const dy = e.clientY - orbit.py;
-    orbit.px = e.clientX;
-    orbit.py = e.clientY;
+    if(activePointers.size >= 2){
+      const pts = Array.from(activePointers.values());
+      const curDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+      const midX = (pts[0].x + pts[1].x) / 2;
+      const midY = (pts[0].y + pts[1].y) / 2;
+
+      if(prevPinchDist > 12 && curDist > 12){
+        const zoomRatio = prevPinchDist / curDist;
+        orbit.r = Math.max(12, Math.min(520, orbit.r * zoomRatio));
+      }
+      const dx = midX - prevPinchMidX;
+      const dy = midY - prevPinchMidY;
+      if(Math.abs(dx) > 0.2 || Math.abs(dy) > 0.2){
+        applyPanDelta(dx, dy);
+      }
+
+      prevPinchDist = curDist;
+      prevPinchMidX = midX;
+      prevPinchMidY = midY;
+      return;
+    }
+
+    if(!orbit.drag) return;
+    const dx = pt.x - orbit.px;
+    const dy = pt.y - orbit.py;
+    orbit.px = pt.x;
+    orbit.py = pt.y;
 
     if(orbit.dragMode === "rotate"){
-      // Xoay 3D (Orbit Rotate)
       orbit.az -= dx * 0.0075;
       orbit.el = Math.max(0.08, Math.min(1.52, orbit.el - dy * 0.0055));
     } else if(orbit.dragMode === "pan"){
-      // Pan camera (Dời khung nhìn theo phương mặt phẳng nhìn)
-      const panFactor = orbit.r * 0.0016;
-      const sinAz = Math.sin(orbit.az);
-      const cosAz = Math.cos(orbit.az);
-      orbit.cx -= (dx * cosAz + dy * sinAz * Math.sin(orbit.el)) * panFactor;
-      orbit.cz += (dx * sinAz - dy * cosAz * Math.sin(orbit.el)) * panFactor;
-      orbit.cy = (orbit.cy || 0) + dy * Math.cos(orbit.el) * panFactor;
+      applyPanDelta(dx, dy);
     } else if(orbit.dragMode === "zoom"){
-      // Zoom bằng Ctrl + MB2
-      orbit.r = Math.max(12, Math.min(500, orbit.r * (1 + dy * 0.01)));
+      orbit.r = Math.max(12, Math.min(520, orbit.r * (1 + dy * 0.01)));
     }
   };
 
   const onPointerUp = e => {
-    orbit.drag = false;
+    activePointers.delete(e.pointerId);
     try { canvas.releasePointerCapture(e.pointerId); } catch(err){}
+    if(activePointers.size === 1){
+      const rem = Array.from(activePointers.values())[0];
+      orbit.px = rem.x;
+      orbit.py = rem.y;
+      orbit.dragMode = "rotate";
+      orbit.drag = true;
+    } else if(activePointers.size === 0){
+      orbit.drag = false;
+      prevPinchDist = 0;
+    }
   };
 
   canvas.addEventListener("pointerdown", onPointerDown);
@@ -3593,12 +3848,12 @@ function bindOrbit(canvas){
   // Lăn bánh xe chuột (Wheel) = Zoom VỀ PHÍA CON TRỎ (giống Onshape).
   canvas.addEventListener("wheel", e => {
     e.preventDefault();
+    targetOrbit = null;
     const factor = e.deltaY > 0 ? 1.08 : 0.92;
-    const newR = Math.max(12, Math.min(500, orbit.r * factor));
-    // Dời tâm nhìn về điểm dưới con trỏ: zoom-in kéo lại gần, zoom-out đẩy ra.
+    const newR = Math.max(12, Math.min(520, orbit.r * factor));
     try{
       if(camera && typeof THREE !== "undefined"){
-        camera.updateProjectionMatrix();   // đảm bảo ma trận hiện hành để unproject đúng
+        camera.updateProjectionMatrix();
         camera.updateMatrixWorld();
         const rect = canvas.getBoundingClientRect();
         const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -3607,17 +3862,17 @@ function bindOrbit(canvas){
         ray.setFromCamera({x: ndcX, y: ndcY}, camera);
         const dy = ray.ray.direction.y;
         if(Math.abs(dy) > 1e-5){
-          const t = -ray.ray.origin.y / dy;            // giao mặt phẳng sàn y=0
+          const t = -ray.ray.origin.y / dy;
           if(t > 0 && isFinite(t)){
             const hx = ray.ray.origin.x + ray.ray.direction.x * t;
             const hz = ray.ray.origin.z + ray.ray.direction.z * t;
-            const frac = (orbit.r - newR) / orbit.r;    // >0 khi zoom-in
+            const frac = (orbit.r - newR) / orbit.r;
             orbit.cx += (hx - orbit.cx) * frac * 0.9;
             orbit.cz += (hz - orbit.cz) * frac * 0.9;
           }
         }
       }
-    }catch(err){ /* bỏ qua, vẫn zoom quanh tâm */ }
+    }catch(err){}
     orbit.r = newR;
   }, {passive: false});
 }
@@ -3672,13 +3927,16 @@ function getOnDutyWorker(m, t){
 const HOT=0xff7a2d, ARC=0x36c3f2;
 function renderThree(){
   if(!threeReady)return;
+  if(autoRotate3D && !orbit.drag && !targetOrbit){
+    orbit.az -= 0.0038;
+  }
   const cyVal = orbit.cy || 0;
   camera.position.set(
     orbit.cx + orbit.r * Math.cos(orbit.el) * Math.sin(orbit.az),
     cyVal + orbit.r * Math.sin(orbit.el),
     orbit.cz + orbit.r * Math.cos(orbit.el) * Math.cos(orbit.az)
   );
-  camera.lookAt(orbit.cx, cyVal + 3.4, orbit.cz);
+  camera.lookAt(orbit.cx, cyVal + 2.2, orbit.cz);
   const nowMs = performance.now();
   const t=sim.t, pulse=0.55+0.45*Math.sin(nowMs*0.018);
 
@@ -4109,6 +4367,93 @@ function getEffectiveGanttSched(){
   return { sched: schedule, isRefFallback: false, makespan: Math.max(540, (schedule && schedule.makespan) || 540), startMin: 0, startDay: 0 };
 }
 
+let ganttZoomX = 1.0, ganttZoomY = 1.0, ganttPanMin = 0, ganttPanY = 0;
+
+function adjustGanttZoom(factor){
+  ganttZoomX = Math.max(1.0, Math.min(14.0, +(ganttZoomX * factor).toFixed(2)));
+  ganttZoomY = Math.max(1.0, Math.min(3.5, +(1 + (ganttZoomX - 1) * 0.32).toFixed(2)));
+  if(ganttZoomX <= 1.02){ ganttZoomX = 1.0; ganttZoomY = 1.0; ganttPanMin = 0; ganttPanY = 0; }
+  const lbl = document.getElementById("ganttZoomLbl");
+  if(lbl) lbl.textContent = Math.round(ganttZoomX * 100) + "%";
+  _lastGanttMs = 0;
+  renderGantt();
+}
+
+function resetGanttView(){
+  ganttZoomX = 1.0; ganttZoomY = 1.0; ganttPanMin = 0; ganttPanY = 0;
+  const lbl = document.getElementById("ganttZoomLbl");
+  if(lbl) lbl.textContent = "100%";
+  _lastGanttMs = 0;
+  renderGantt();
+}
+
+function syncGanttFsOrientation(){
+  const pane = document.getElementById("pane-gantt");
+  if(!pane) return;
+  const isFs = pane.classList.contains("gantt-fs") || pane.classList.contains("gantt-landscape-fs") ||
+               document.fullscreenElement === pane || document.webkitFullscreenElement === pane;
+  const exitBtn = document.getElementById("btnExitGanttFs");
+  const fsBtn = document.getElementById("btnFullscreenGantt");
+  if(exitBtn) exitBtn.style.display = isFs ? "inline-block" : "none";
+  if(fsBtn) fsBtn.textContent = isFs ? "✕ Thoát Full" : "⛶ Full";
+
+  if(isFs){
+    const isPortraitMobile = window.innerWidth <= 900 && window.innerWidth < window.innerHeight;
+    if(isPortraitMobile){
+      pane.classList.remove("gantt-fs");
+      pane.classList.add("gantt-landscape-fs");
+    } else {
+      pane.classList.remove("gantt-landscape-fs");
+      pane.classList.add("gantt-fs");
+    }
+  }
+  _lastGanttMs = 0;
+  renderGantt();
+}
+
+function exitGanttFullscreen(){
+  const pane = document.getElementById("pane-gantt");
+  if(pane){
+    pane.classList.remove("gantt-fs");
+    pane.classList.remove("gantt-landscape-fs");
+  }
+  if(document.fullscreenElement || document.webkitFullscreenElement){
+    if(document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+    else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
+  }
+  if(screen.orientation && screen.orientation.unlock){
+    try { screen.orientation.unlock(); } catch(e){}
+  }
+  const exitBtn = document.getElementById("btnExitGanttFs");
+  const fsBtn = document.getElementById("btnFullscreenGantt");
+  if(exitBtn) exitBtn.style.display = "none";
+  if(fsBtn) fsBtn.textContent = "⛶ Full";
+  _lastGanttMs = 0;
+  setTimeout(renderGantt, 60);
+}
+
+function toggleGanttFullscreen(){
+  const pane = document.getElementById("pane-gantt");
+  if(!pane) return;
+  const isFs = pane.classList.contains("gantt-fs") || pane.classList.contains("gantt-landscape-fs") ||
+               document.fullscreenElement === pane || document.webkitFullscreenElement === pane;
+  if(isFs) exitGanttFullscreen();
+  else {
+    pane.classList.add("gantt-fs");
+    if(pane.requestFullscreen && window.innerWidth > 900){
+      pane.requestFullscreen().catch(()=>{});
+    } else if(screen.orientation && screen.orientation.lock && window.innerWidth <= 900){
+      screen.orientation.lock("landscape").catch(()=>{});
+    }
+    syncGanttFsOrientation();
+    setTimeout(syncGanttFsOrientation, 80);
+  }
+}
+window.adjustGanttZoom = adjustGanttZoom;
+window.resetGanttView = resetGanttView;
+window.toggleGanttFullscreen = toggleGanttFullscreen;
+window.exitGanttFullscreen = exitGanttFullscreen;
+
 function renderGantt(){
   const cv=document.getElementById("gantt"); if(!cv) return;
   const p=cv.parentElement;
@@ -4119,31 +4464,50 @@ function renderGantt(){
   const x=cv.getContext("2d"); x.setTransform(dpr,0,0,dpr,0,0);
   x.clearRect(0,0,w,h);
 
-  const { sched: gSched, isRefFallback, makespan: effMakespan, startMin = 0, startDay = 0 } = getEffectiveGanttSched();
-  const spanMin = Math.max(60, effMakespan - startMin);
+  const { sched: gSched, isRefFallback, makespan: rawEffMakespan, startMin: rawStartMin = 0 } = getEffectiveGanttSched();
+  const totalSpanMin = Math.max(60, rawEffMakespan - rawStartMin);
+  const spanMin = Math.max(30, totalSpanMin / Math.max(1, ganttZoomX));
+  ganttPanMin = Math.max(0, Math.min(Math.max(0, totalSpanMin - spanMin), ganttPanMin));
+  const startMin = rawStartMin + ganttPanMin;
+  const effMakespan = startMin + spanMin;
+  const startDay = Math.floor(startMin / 1440);
+
   const fg=cssVar("--fg"),muted=cssVar("--muted"),line=cssVar("--line"),hot=cssVar("--hot"),good=cssVar("--good");
   const labW=92, padT=34, padB=28, N=Math.max(1, model.machines.length);
-  const rowH=Math.max(12,Math.min(28,(h-padT-padB)/N));
+  const availH = Math.max(40, h - padT - padB);
+  const baseRowH = Math.max(14, Math.min(28, availH / N));
+  const rowH = baseRowH * Math.max(1, ganttZoomY);
+  const maxPanY = Math.max(0, N * rowH - availH);
+  ganttPanY = Math.max(0, Math.min(maxPanY, ganttPanY));
+
   const scale=(w-labW-14)/spanMin;
   const endDay = Math.min(startDay + 365, Math.max(startDay + 1, Math.ceil(effMakespan / 1440) || 1));
+  const mShifts = model.machines.map((_, i) => getMachineShiftInfo(i));
 
-  // 1. Nền hàng máy xen kẽ (Zebra rows) để dễ theo dõi từng máy
+  // Vùng vẽ nội dung chính của lịch (Clip không tràn vào cột máy bên trái và thanh thước trên/dưới)
+  x.save();
+  x.beginPath();
+  x.rect(labW, padT - 2, Math.max(1, w - labW), availH + 4);
+  x.clip();
+
+  // 1. Nền hàng máy xen kẽ (Zebra rows)
   for(let i=0; i<N; i++){
-    const gy = padT + i * rowH;
+    const gy = padT + i * rowH - ganttPanY;
+    if(gy + rowH < padT - 2 || gy > h - padB + 2) continue;
     x.fillStyle = (i % 2 === 0) ? "rgba(255, 255, 255, 0.02)" : "rgba(0, 0, 0, 0.08)";
-    x.fillRect(0, gy, w, rowH);
+    x.fillRect(labW, gy, w - labW, rowH);
     x.strokeStyle = "rgba(255, 255, 255, 0.04)";
     x.lineWidth = 1;
-    x.beginPath(); x.moveTo(0, gy + rowH); x.lineTo(w, gy + rowH); x.stroke();
+    x.beginPath(); x.moveTo(labW, gy + rowH); x.lineTo(w, gy + rowH); x.stroke();
   }
 
   // 2. Vùng nghỉ ca & Vùng hết ca theo từng máy
-  const mShifts = model.machines.map((_, i) => getMachineShiftInfo(i));
   for(let d=startDay; d<endDay; d++){
     const dayOffset = d * 1440;
     for(let i=0; i<N; i++){
+      const gy = padT + i * rowH - ganttPanY;
+      if(gy + rowH < padT - 2 || gy > h - padB + 2) continue;
       const mSh = mShifts[i];
-      const gy = padT + i * rowH;
 
       if(mSh.breaks){
         mSh.breaks.forEach(b => {
@@ -4171,81 +4535,33 @@ function renderGantt(){
     }
   }
 
-  // 3. Header ngày ở trên cùng (Dải tiêu đề ngày sắc nét)
-  x.fillStyle = "rgba(30, 58, 138, 0.35)";
-  x.fillRect(0, 0, w, padT - 4);
-  x.strokeStyle = "rgba(59, 130, 246, 0.4)";
-  x.lineWidth = 1;
-  x.beginPath(); x.moveTo(0, padT - 4); x.lineTo(w, padT - 4); x.stroke();
-
+  // Vạch chia ngày dọc & lưới thời gian dọc
   for(let d=startDay; d<endDay; d++){
     const dayStart = d * 1440;
-    const dayEnd = (d + 1) * 1440;
     const sx = labW + (dayStart - startMin) * scale;
-    const ex = Math.min(w, labW + (dayEnd - startMin) * scale);
-    const boxW = ex - sx;
-
-    // Vạch chia ngày từ trên xuống dưới
-    x.strokeStyle = "rgba(59, 130, 246, 0.55)";
-    x.lineWidth = 1.2;
-    x.beginPath(); x.moveTo(sx, 0); x.lineTo(sx, padT + N * rowH); x.stroke();
-
-    if(boxW > 25){
-      const dateLabel = getDateLabelForDayIndex(d);
-      x.fillStyle = "#93c5fd";
-      x.font = "bold 11px 'IBM Plex Sans',sans-serif";
-      x.textAlign = "center";
-      x.textBaseline = "middle";
-      x.fillText(`📅 ${dateLabel}`, sx + boxW / 2, (padT - 4) / 2);
+    if(sx >= labW){
+      x.strokeStyle = "rgba(59, 130, 246, 0.55)";
+      x.lineWidth = 1.2;
+      x.beginPath(); x.moveTo(sx, padT - 2); x.lineTo(sx, h - padB); x.stroke();
     }
   }
 
-  // 4. Cột nhãn máy bên trái
-  x.fillStyle = "rgba(15, 23, 42, 0.85)";
-  x.fillRect(0, 0, labW, h);
-  x.strokeStyle = "rgba(59, 130, 246, 0.3)";
-  x.beginPath(); x.moveTo(labW, 0); x.lineTo(labW, h); x.stroke();
-
-  for(let i=0; i<N; i++){
-    const gy = padT + i * rowH;
-    const mName = model.machines[i];
-    const mSh = mShifts[i];
-    const shiftCode = mSh.code || (mSh.label ? mSh.label.split(":")[0] : "HC");
-
-    x.textAlign = "left";
-    x.textBaseline = "middle";
-    x.font = "bold 10.5px 'IBM Plex Mono',monospace";
-    x.fillStyle = fg;
-    x.fillText(mName, 7, gy + rowH / 2);
-
-    x.textAlign = "right";
-    x.font = "600 8.5px 'IBM Plex Sans',sans-serif";
-    x.fillStyle = shiftCode.includes("24") ? good : muted;
-    x.fillText(shiftCode, labW - 6, gy + rowH / 2);
-  }
-
-  // 5. Thước đo thời gian dưới chân Gantt (Bảo vệ step >= 1 để KHÔNG BAO GIỜ lặp vô hạn khi makespan = 0)
-  x.strokeStyle = line;
-  x.fillStyle = muted;
-  x.textAlign = "center";
-  x.textBaseline = "top";
   const step = Math.max(1, niceStep(spanMin));
   let tickGuard = 0;
-  for(let tt=startMin; tt<=effMakespan+0.5 && tickGuard++ < 200; tt+=step){
+  const firstTick = Math.ceil(startMin / step) * step;
+  x.strokeStyle = line;
+  for(let tt=firstTick; tt<=effMakespan+0.5 && tickGuard++ < 200; tt+=step){
     const gx = labW + (tt - startMin) * scale;
     x.globalAlpha = 0.35;
-    x.beginPath(); x.moveTo(gx, padT); x.lineTo(gx, padT + N * rowH); x.stroke();
-    x.globalAlpha = 1;
-    x.font = "9px 'IBM Plex Mono',monospace";
-    x.fillText(Math.round(tt) + "p", gx, h - 22);
-    x.font = "8px 'IBM Plex Mono',monospace";
-    x.fillText(formatClockTime(tt), gx, h - 11);
+    x.beginPath(); x.moveTo(gx, padT); x.lineTo(gx, h - padB); x.stroke();
   }
+  x.globalAlpha = 1;
 
   // 6. Vùng sự cố máy (Downtimes)
   downtimes.forEach(dt => {
     if(dt.mi < N && dt.start < effMakespan && dt.end > startMin){
-      const gy = padT + dt.mi * rowH;
+      const gy = padT + dt.mi * rowH - ganttPanY;
+      if(gy + rowH < padT - 2 || gy > h - padB + 2) return;
       const ds = Math.max(startMin, dt.start);
       const bx = labW + (ds - startMin) * scale;
       const bw = Math.max(3, (Math.min(dt.end, effMakespan) - ds) * scale);
@@ -4265,15 +4581,17 @@ function renderGantt(){
     }
   });
 
-  // 7. Vẽ các khối công việc hàn (Task Blocks) - Cắt tỉa (clip) chữ gọn gàng
+  // 7. Vẽ các khối công việc hàn (Task Blocks)
   const perMach = (gSched && gSched.perMachine) ? gSched.perMachine : [];
   for(let i=0; i<N; i++){
-    const gy = padT + i * rowH;
+    const gy = padT + i * rowH - ganttPanY;
+    if(gy + rowH < padT - 2 || gy > h - padB + 2) continue;
     (perMach[i] || []).forEach(iv => {
-      if(iv.end <= startMin) return;
+      if(iv.end <= startMin || iv.start >= effMakespan) return;
       const is = Math.max(startMin, iv.start);
+      const ie = Math.min(effMakespan, iv.end);
       const bx = labW + (is - startMin) * scale;
-      const bw = Math.max(3, (iv.end - is) * scale);
+      const bw = Math.max(3, (ie - is) * scale);
       const isHovered = (ganttHoveredIv === iv);
 
       x.fillStyle = partColor(iv.pi);
@@ -4285,7 +4603,6 @@ function renderGantt(){
       x.stroke();
       x.lineWidth = 1;
 
-      // Nhãn chữ bên trong ô - Clip bảo đảm không bị tràn chữ sang ô khác
       if(bw > 18){
         x.save();
         x.beginPath();
@@ -4295,7 +4612,7 @@ function renderGantt(){
         x.fillStyle = "#ffffff";
         x.shadowColor = "rgba(0,0,0,0.85)";
         x.shadowBlur = 2;
-        x.font = "bold 9px 'IBM Plex Mono',monospace";
+        x.font = `bold ${Math.min(11, Math.max(9, rowH * 0.42))}px 'IBM Plex Mono',monospace`;
         x.textBaseline = "middle";
         x.textAlign = "left";
 
@@ -4320,8 +4637,8 @@ function renderGantt(){
       x.lineWidth = 1.5;
       x.setLineDash([3, 3]);
       x.beginPath();
-      x.moveTo(dx, padT - 4);
-      x.lineTo(dx, padT + N * rowH);
+      x.moveTo(dx, padT - 2);
+      x.lineTo(dx, h - padB);
       x.stroke();
       x.fillStyle = "#ef4444";
       x.font = "bold 9px 'IBM Plex Sans',sans-serif";
@@ -4332,12 +4649,85 @@ function renderGantt(){
   });
 
   // 9. Vạch thời gian mô phỏng hiện tại
-  const clampedSimT = Math.min(effMakespan, Math.max(startMin, sim.t));
-  const cx = labW + (clampedSimT - startMin) * scale;
-  x.strokeStyle = hot;
-  x.lineWidth = 2;
-  x.beginPath(); x.moveTo(cx, padT - 4); x.lineTo(cx, padT + N * rowH + 2); x.stroke();
+  if(sim.t >= startMin && sim.t <= effMakespan){
+    const cx = labW + (sim.t - startMin) * scale;
+    x.strokeStyle = hot;
+    x.lineWidth = 2;
+    x.beginPath(); x.moveTo(cx, padT - 2); x.lineTo(cx, h - padB); x.stroke();
+    x.lineWidth = 1;
+  }
+
+  x.restore(); // Kết thúc clip vùng thân lịch
+
+  // 3. Header ngày ở trên cùng (Ghim cố định phía trên)
+  x.fillStyle = "rgba(30, 58, 138, 0.35)";
+  x.fillRect(0, 0, w, padT - 4);
+  x.strokeStyle = "rgba(59, 130, 246, 0.4)";
   x.lineWidth = 1;
+  x.beginPath(); x.moveTo(0, padT - 4); x.lineTo(w, padT - 4); x.stroke();
+
+  x.save();
+  x.beginPath(); x.rect(labW, 0, Math.max(1, w - labW), padT - 4); x.clip();
+  for(let d=startDay; d<endDay; d++){
+    const dayStart = d * 1440;
+    const dayEnd = (d + 1) * 1440;
+    const sx = Math.max(labW, labW + (dayStart - startMin) * scale);
+    const ex = Math.min(w, labW + (dayEnd - startMin) * scale);
+    const boxW = ex - sx;
+    if(boxW > 25){
+      const dateLabel = getDateLabelForDayIndex(d);
+      x.fillStyle = "#93c5fd";
+      x.font = "bold 11px 'IBM Plex Sans',sans-serif";
+      x.textAlign = "center";
+      x.textBaseline = "middle";
+      x.fillText(`📅 ${dateLabel}`, sx + boxW / 2, (padT - 4) / 2);
+    }
+  }
+  x.restore();
+
+  // 4. Cột nhãn máy bên trái (Ghim cố định bên trái, cuộn dọc đồng bộ với hàng máy)
+  x.fillStyle = "rgba(15, 23, 42, 0.92)";
+  x.fillRect(0, 0, labW, h);
+  x.strokeStyle = "rgba(59, 130, 246, 0.3)";
+  x.beginPath(); x.moveTo(labW, 0); x.lineTo(labW, h); x.stroke();
+
+  x.save();
+  x.beginPath(); x.rect(0, padT - 2, labW, availH + 4); x.clip();
+  for(let i=0; i<N; i++){
+    const gy = padT + i * rowH - ganttPanY;
+    if(gy + rowH < padT - 2 || gy > h - padB + 2) continue;
+    const mName = model.machines[i];
+    const mSh = mShifts[i];
+    const shiftCode = mSh.code || (mSh.label ? mSh.label.split(":")[0] : "HC");
+
+    x.textAlign = "left";
+    x.textBaseline = "middle";
+    x.font = "bold 10.5px 'IBM Plex Mono',monospace";
+    x.fillStyle = fg;
+    x.fillText(mName, 7, gy + rowH / 2);
+
+    x.textAlign = "right";
+    x.font = "600 8.5px 'IBM Plex Sans',sans-serif";
+    x.fillStyle = shiftCode.includes("24") ? good : muted;
+    x.fillText(shiftCode, labW - 6, gy + rowH / 2);
+  }
+  x.restore();
+
+  // 5. Thước đo thời gian dưới chân Gantt
+  x.save();
+  x.beginPath(); x.rect(labW, h - padB, Math.max(1, w - labW), padB); x.clip();
+  x.fillStyle = muted;
+  x.textAlign = "center";
+  x.textBaseline = "top";
+  tickGuard = 0;
+  for(let tt=firstTick; tt<=effMakespan+0.5 && tickGuard++ < 200; tt+=step){
+    const gx = labW + (tt - startMin) * scale;
+    x.font = "9px 'IBM Plex Mono',monospace";
+    x.fillText(Math.round(tt) + "p", gx, h - 22);
+    x.font = "8px 'IBM Plex Mono',monospace";
+    x.fillText(formatClockTime(tt), gx, h - 11);
+  }
+  x.restore();
 
   // 10. Nhãn thông báo khi 100% kế hoạch đã hoàn thành (Thực tế >= Kế hoạch)
   if(isRefFallback){
@@ -5257,9 +5647,10 @@ function applyKhsxFreeze(wrap, frozenCount){
   const table = wrap && wrap.querySelector("table.khsxTable");
   if(!table || !table.tHead || !table.tHead.rows[0]) return;
   const headCells = table.tHead.rows[0].cells;
-  const n = Math.min(frozenCount, headCells.length);
+  // Trên điện thoại (<= 900px), chỉ ghim 2 cột đầu (STT + Part) để không che hết màn hình khi vuốt ngang
+  const effCount = (window.innerWidth <= 900) ? Math.min(2, frozenCount) : frozenCount;
+  const n = Math.min(effCount, headCells.length);
   if(n <= 0) return;
-  // Bảng đang ẩn (chưa có bề rộng) → bỏ qua, sẽ ghim lại khi mở tab
   if(headCells[0].getBoundingClientRect().width < 1) return;
   const lefts = [];
   let acc = 0;
@@ -5271,13 +5662,25 @@ function applyKhsxFreeze(wrap, frozenCount){
     cell.style.position = "sticky";
     cell.style.left = lefts[i] + "px";
     cell.style.zIndex = isHeader ? "7" : "3";
-    if(i === n - 1) cell.style.boxShadow = "3px 0 5px -2px rgba(0,0,0,0.45)";
+    cell.style.boxShadow = (i === n - 1) ? "3px 0 5px -2px rgba(0,0,0,0.45)" : "";
   };
-  for(let i=0;i<n;i++) stick(headCells[i], i, true);
+  const unstick = (cell, isHeader) => {
+    cell.style.position = isHeader ? "sticky" : "";
+    cell.style.left = "";
+    cell.style.zIndex = isHeader ? "4" : "";
+    cell.style.boxShadow = "";
+  };
+  for(let i=0;i<headCells.length;i++){
+    if(i < n) stick(headCells[i], i, true);
+    else if(i < 8) unstick(headCells[i], true);
+  }
   for(const tb of table.tBodies){
     for(const row of tb.rows){
-      if(row.cells.length < n) continue;   // bỏ qua dòng "không tìm thấy" (dùng colspan)
-      for(let i=0;i<n;i++) stick(row.cells[i], i, false);
+      if(row.cells.length < n) continue;
+      for(let i=0;i<Math.min(8, row.cells.length);i++){
+        if(i < n) stick(row.cells[i], i, false);
+        else unstick(row.cells[i], false);
+      }
     }
   }
 }
@@ -6741,8 +7144,25 @@ function exportWorkersExcel(){
 function setTab(name){
   activeTab=name;
   if (typeof closeMobileSidebar === "function") closeMobileSidebar();
-  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.pane===name));
+  if (name !== "three" && is3DFullscreen) exit3DFullscreen();
+  if (name !== "gantt" && isGanttFullscreen) exitGanttFullscreen();
+  document.querySelectorAll(".tab").forEach(t => {
+    const isAct = t.dataset.pane === name;
+    t.classList.toggle("active", isAct);
+    if(isAct && window.innerWidth <= 900 && t.scrollIntoView){
+      try { t.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" }); } catch(e){}
+    }
+  });
   document.querySelectorAll(".pane").forEach(p=>p.hidden = p.id!=="pane-"+name);
+  const vizEl = document.querySelector(".viz");
+  if(vizEl){
+    vizEl.classList.toggle("hide-transport-mobile", name !== "three" && name !== "gantt");
+  }
+  const zoomPill = document.getElementById("mobileZoomPill");
+  if(zoomPill){
+    const showPill = window.innerWidth <= 900 && (name === "khsxDong" || name === "wip" || name === "workers" || name === "ai");
+    zoomPill.style.display = showPill ? "inline-flex" : "none";
+  }
   if(name==="three") resizeThree();
   // KHÔNG vẽ Gantt đồng bộ ở đây (bấm chuyển tab nhanh sẽ dồn nhiều lần vẽ nặng -> treo).
   // Chỉ đặt cờ để vòng lặp vẽ 1 lần ở frame kế tiếp (không chặn luồng khi click).
@@ -7754,42 +8174,66 @@ if(elKhsxStatus){
   });
 }
 
-// Gắn sự kiện tra cứu Tooltip cho biểu đồ Gantt
+// Gắn sự kiện tra cứu Tooltip, Kéo trượt (Pan) & Chụm 2 ngón Phóng to/Thu nhỏ (Pinch-to-Zoom) cho biểu đồ Gantt
 const cvGantt = document.getElementById("gantt");
 const tipGantt = document.getElementById("ganttTooltip");
 if(cvGantt && tipGantt){
-  cvGantt.addEventListener("mousemove", ev => {
+  const ganttPointers = new Map();
+  let ganttDrag = false, ganttMoved = false, ganttLastX = 0, ganttLastY = 0;
+  let ganttPinchDist = 0, ganttPinchZX = 1, ganttPinchZY = 1;
+
+  function ganttLocalCoord(clientX, clientY){
+    const pane = document.getElementById("pane-gantt");
+    const isLand = pane && pane.classList.contains("gantt-landscape-fs");
+    const rect = cvGantt.getBoundingClientRect();
+    if(isLand){
+      return {
+        mx: clientY - rect.top,
+        my: rect.right - clientX,
+        w: cvGantt.clientWidth || rect.height,
+        h: cvGantt.clientHeight || rect.width
+      };
+    }
+    return {
+      mx: clientX - rect.left,
+      my: clientY - rect.top,
+      w: rect.width,
+      h: rect.height
+    };
+  }
+
+  function showGanttTooltipAt(clientX, clientY){
     if(!schedule || !model) return;
     const { sched: gSched, makespan: effMakespan, startMin = 0 } = getEffectiveGanttSched();
-    const spanMin = Math.max(60, effMakespan - startMin);
-    const rect = cvGantt.getBoundingClientRect();
-    const mx = ev.clientX - rect.left;
-    const my = ev.clientY - rect.top;
+    const fullSpanMin = Math.max(60, effMakespan - startMin);
+    const { mx, my, w, h } = ganttLocalCoord(clientX, clientY);
     const N = Math.max(1, model.machines.length);
-    const labW = 92, padT = 34, padB = 28;
-    const h = rect.height;
-    const rowH = Math.max(12, Math.min(28, (h - padT - padB) / N));
-    const scale = (rect.width - labW - 14) / spanMin;
+    const isMobile = window.innerWidth <= 900 && !isGanttFullscreen;
+    const labW = isMobile ? 76 : 92, padT = 34, padB = 28;
+    const baseRowH = Math.max(12, Math.min(28, (h - padT - padB) / N));
+    const rowH = baseRowH * ganttZoomY;
+    const visSpanMin = Math.max(30, fullSpanMin / ganttZoomX);
+    const visStartMin = startMin + ganttPanMin;
+    const scale = (w - labW - 14) / visSpanMin;
 
-    if(mx < labW || my < padT || my > padT + N * rowH){
+    if(mx < labW || my < padT || my > h - padB){
       tipGantt.style.display = "none";
       if(ganttHoveredIv !== null){ ganttHoveredIv = null; _lastGanttMs = 0; }
       return;
     }
 
-    const mi = Math.floor((my - padT) / rowH);
+    const mi = Math.floor((my - padT + ganttPanY) / rowH);
     if(mi < 0 || mi >= N){
       tipGantt.style.display = "none";
       if(ganttHoveredIv !== null){ ganttHoveredIv = null; _lastGanttMs = 0; }
       return;
     }
 
-    const tMouse = startMin + (mx - labW) / scale;
+    const tMouse = visStartMin + (mx - labW) / scale;
     const mName = model.machines[mi];
     const mSh = getMachineShiftInfo(mi);
     const shiftCode = mSh.code || (mSh.label ? mSh.label.split(":")[0] : "HC");
 
-    // 1. Tìm xem chuột trúng khối việc nào
     const perMach = (gSched && gSched.perMachine) ? gSched.perMachine : [];
     const iv = (perMach[mi] || []).find(it => tMouse >= it.start && tMouse <= it.end);
     if(iv){
@@ -7825,14 +8269,13 @@ if(cvGantt && tipGantt){
       const tipH = tipGantt.offsetHeight || 110;
       let left = mx + 14;
       let top = my + 10;
-      if(left + tipW > rect.width) left = Math.max(10, mx - tipW - 14);
-      if(top + tipH > rect.height) top = Math.max(10, my - tipH - 10);
+      if(left + tipW > w) left = Math.max(10, mx - tipW - 14);
+      if(top + tipH > h) top = Math.max(10, my - tipH - 10);
       tipGantt.style.left = left + "px";
       tipGantt.style.top = top + "px";
       return;
     }
 
-    // 2. Kiểm tra xem chuột có trúng sự cố máy (Downtimes) không
     const dt = downtimes.find(d => d.mi === mi && tMouse >= d.start && tMouse <= d.end);
     if(dt){
       if(ganttHoveredIv !== null){ ganttHoveredIv = null; _lastGanttMs = 0; }
@@ -7843,18 +8286,121 @@ if(cvGantt && tipGantt){
         <div style="margin-top:3px;color:#94a3b8;font-size:10.5px">⏱ ${formatClockTime(dt.start)} → ${formatClockTime(dt.end)} (${Math.round(dt.end - dt.start)}p)</div>
       `;
       tipGantt.style.display = "block";
-      tipGantt.style.left = (mx + 14) + "px";
-      tipGantt.style.top = (my + 10) + "px";
+      tipGantt.style.left = Math.min(w - 220, mx + 14) + "px";
+      tipGantt.style.top = Math.min(h - 90, my + 10) + "px";
       return;
     }
 
     tipGantt.style.display = "none";
     if(ganttHoveredIv !== null){ ganttHoveredIv = null; _lastGanttMs = 0; }
+  }
+
+  cvGantt.addEventListener("pointerdown", e => {
+    ganttPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try { cvGantt.setPointerCapture(e.pointerId); } catch(err){}
+    if(ganttPointers.size === 1){
+      ganttDrag = true;
+      ganttMoved = false;
+      const loc = ganttLocalCoord(e.clientX, e.clientY);
+      ganttLastX = loc.mx;
+      ganttLastY = loc.my;
+    } else if(ganttPointers.size === 2){
+      ganttDrag = false;
+      const pts = [...ganttPointers.values()];
+      const p0 = ganttLocalCoord(pts[0].x, pts[0].y);
+      const p1 = ganttLocalCoord(pts[1].x, pts[1].y);
+      ganttPinchDist = Math.hypot(p1.mx - p0.mx, p1.my - p0.my);
+      ganttPinchZX = ganttZoomX;
+      ganttPinchZY = ganttZoomY;
+      tipGantt.style.display = "none";
+    }
   });
 
+  cvGantt.addEventListener("pointermove", e => {
+    if(ganttPointers.has(e.pointerId)){
+      ganttPointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+    if(ganttPointers.size === 2){
+      const pts = [...ganttPointers.values()];
+      const p0 = ganttLocalCoord(pts[0].x, pts[0].y);
+      const p1 = ganttLocalCoord(pts[1].x, pts[1].y);
+      const dist = Math.hypot(p1.mx - p0.mx, p1.my - p0.my);
+      if(ganttPinchDist > 12){
+        const ratio = dist / ganttPinchDist;
+        ganttZoomX = Math.max(1, Math.min(12, +(ganttPinchZX * ratio).toFixed(2)));
+        ganttZoomY = Math.max(1, Math.min(4, +(1 + (ganttZoomX - 1) * 0.35).toFixed(2)));
+        const lbl = document.getElementById("ganttZoomLbl");
+        if(lbl) lbl.textContent = Math.round(ganttZoomX * 100) + "%";
+        _lastGanttMs = 0;
+        renderGantt();
+      }
+      return;
+    }
+    if(ganttPointers.size === 1 && ganttDrag){
+      const loc = ganttLocalCoord(e.clientX, e.clientY);
+      const dx = loc.mx - ganttLastX;
+      const dy = loc.my - ganttLastY;
+      if(Math.hypot(dx, dy) > 4) ganttMoved = true;
+      ganttLastX = loc.mx;
+      ganttLastY = loc.my;
+      if(ganttMoved && schedule && model && (ganttZoomX > 1.01 || ganttZoomY > 1.01)){
+        const { makespan: effMakespan, startMin = 0 } = getEffectiveGanttSched();
+        const fullSpanMin = Math.max(60, effMakespan - startMin);
+        const visSpanMin = Math.max(30, fullSpanMin / ganttZoomX);
+        const isMobile = window.innerWidth <= 900 && !isGanttFullscreen;
+        const labW = isMobile ? 76 : 92;
+        const scale = Math.max(0.05, (loc.w - labW - 14) / visSpanMin);
+        ganttPanMin = Math.max(0, Math.min(fullSpanMin - visSpanMin, ganttPanMin - dx / scale));
+        ganttPanY = Math.max(0, ganttPanY - dy);
+        tipGantt.style.display = "none";
+        _lastGanttMs = 0;
+        renderGantt();
+        return;
+      }
+    }
+    if(e.pointerType === "mouse" && !ganttDrag){
+      showGanttTooltipAt(e.clientX, e.clientY);
+    }
+  });
+
+  function endGanttPointer(e){
+    const wasSingleTap = ganttPointers.size === 1 && !ganttMoved;
+    ganttPointers.delete(e.pointerId);
+    if(ganttPointers.size === 0){
+      ganttDrag = false;
+      if(wasSingleTap){
+        showGanttTooltipAt(e.clientX, e.clientY);
+      }
+    } else if(ganttPointers.size === 1){
+      const rem = [...ganttPointers.values()][0];
+      const loc = ganttLocalCoord(rem.x, rem.y);
+      ganttLastX = loc.mx;
+      ganttLastY = loc.my;
+      ganttDrag = true;
+    }
+  }
+  cvGantt.addEventListener("pointerup", endGanttPointer);
+  cvGantt.addEventListener("pointercancel", endGanttPointer);
+
+  cvGantt.addEventListener("wheel", e => {
+    e.preventDefault();
+    if(e.ctrlKey || Math.abs(e.deltaY) > Math.abs(e.deltaX)){
+      adjustGanttZoom(e.deltaY < 0 ? 0.25 : -0.25);
+    } else if(schedule){
+      const { makespan: effMakespan, startMin = 0 } = getEffectiveGanttSched();
+      const fullSpanMin = Math.max(60, effMakespan - startMin);
+      const visSpanMin = Math.max(30, fullSpanMin / ganttZoomX);
+      ganttPanMin = Math.max(0, Math.min(fullSpanMin - visSpanMin, ganttPanMin + e.deltaX * 0.5));
+      _lastGanttMs = 0;
+      renderGantt();
+    }
+  }, { passive: false });
+
   cvGantt.addEventListener("mouseleave", () => {
-    tipGantt.style.display = "none";
-    if(ganttHoveredIv !== null){ ganttHoveredIv = null; _lastGanttMs = 0; }
+    if(!ganttDrag){
+      tipGantt.style.display = "none";
+      if(ganttHoveredIv !== null){ ganttHoveredIv = null; _lastGanttMs = 0; }
+    }
   });
 }
 
@@ -8131,17 +8677,25 @@ function closeMobileSidebar() {
 }
 
 let curTableZoom = 1.0;
-function adjustTableZoom(delta, reset) {
-  if (reset) {
-    curTableZoom = 1.0;
-  } else {
-    curTableZoom = Math.min(2.0, Math.max(0.6, +(curTableZoom + delta).toFixed(2)));
-  }
+function applyTableZoomValue(val) {
+  curTableZoom = Math.min(2.2, Math.max(0.6, +val.toFixed(2)));
   document.documentElement.style.setProperty("--table-zoom", curTableZoom);
   document.querySelectorAll(".zoomLevelLbl").forEach(el => {
     el.textContent = Math.round(curTableZoom * 100) + "%";
   });
+  const wrap = document.getElementById("khsxDongTableWrap");
+  if(wrap && activeTab === "khsxDong"){
+    requestAnimationFrame(() => applyKhsxFreeze(wrap, 8));
+  }
   try { localStorage.setItem("xuong_spot_table_zoom", curTableZoom); } catch(e){}
+}
+
+function adjustTableZoom(delta, reset) {
+  if (reset) {
+    applyTableZoomValue(1.0);
+  } else {
+    applyTableZoomValue(curTableZoom + delta);
+  }
 }
 
 function initTableZoom() {
@@ -8149,18 +8703,63 @@ function initTableZoom() {
     const saved = localStorage.getItem("xuong_spot_table_zoom");
     if (saved) {
       const z = parseFloat(saved);
-      if (!isNaN(z) && z >= 0.6 && z <= 2.0) {
-        curTableZoom = z;
-        document.documentElement.style.setProperty("--table-zoom", curTableZoom);
-        document.querySelectorAll(".zoomLevelLbl").forEach(el => {
-          el.textContent = Math.round(curTableZoom * 100) + "%";
-        });
+      if (!isNaN(z) && z >= 0.6 && z <= 2.2) {
+        applyTableZoomValue(z);
       }
     }
   } catch(e){}
 }
 
+// Hỗ trợ chụm 2 ngón tay (Pinch-to-Zoom) trực tiếp trên các tab bảng dữ liệu & AI trên điện thoại
+function bindMobileTablePinchZoom() {
+  const paneIds = ["pane-khsxDong", "pane-wip", "pane-workers", "pane-ai"];
+  paneIds.forEach(id => {
+    const el = document.getElementById(id);
+    if(!el) return;
+    let startDist = 0;
+    let startZoom = 1.0;
+    el.addEventListener("touchstart", e => {
+      if(e.touches && e.touches.length === 2){
+        const dx = e.touches[1].clientX - e.touches[0].clientX;
+        const dy = e.touches[1].clientY - e.touches[0].clientY;
+        startDist = Math.hypot(dx, dy);
+        startZoom = curTableZoom;
+      }
+    }, { passive: true });
+
+    el.addEventListener("touchmove", e => {
+      if(e.touches && e.touches.length === 2 && startDist > 16){
+        e.preventDefault();
+        const dx = e.touches[1].clientX - e.touches[0].clientX;
+        const dy = e.touches[1].clientY - e.touches[0].clientY;
+        const dist = Math.hypot(dx, dy);
+        const ratio = dist / startDist;
+        applyTableZoomValue(startZoom * ratio);
+      }
+    }, { passive: false });
+
+    el.addEventListener("touchend", e => {
+      if(!e.touches || e.touches.length < 2){
+        startDist = 0;
+      }
+    }, { passive: true });
+  });
+}
+
 initTableZoom();
+bindMobileTablePinchZoom();
+
+window.addEventListener("resize", () => {
+  if(is3DFullscreen) sync3DFsOrientation();
+  if(isGanttFullscreen){
+    const pane = document.getElementById("pane-gantt");
+    if(pane) pane.classList.toggle("gantt-landscape-fs", window.innerHeight > window.innerWidth);
+    _lastGanttMs = 0;
+    renderGantt();
+  }
+  const wrap = document.getElementById("khsxDongTableWrap");
+  if(wrap && activeTab === "khsxDong") applyKhsxFreeze(wrap, 8);
+});
 
 window.toggleMobileDrawer = toggleMobileDrawer;
 window.closeMobileSidebar = closeMobileSidebar;

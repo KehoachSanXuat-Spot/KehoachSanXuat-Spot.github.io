@@ -161,7 +161,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 
 footer{flex:0 0 auto;padding:7px 14px;color:var(--faint);font-size:11px;text-align:center;border-top:1px solid var(--line);background:var(--panel)}
 
-/* Hỗ trợ phóng to/thu nhỏ cỡ chữ bảng qua biến --table-zoom */
+/* Hỗ trợ phóng to/thu nhỏ cỡ chữ bảng & nội dung qua biến --table-zoom */
 .khsxTable, #wipContent table, #workerContent table {
   font-size: calc(11.5px * var(--table-zoom)) !important;
 }
@@ -169,23 +169,61 @@ footer{flex:0 0 auto;padding:7px 14px;color:var(--faint);font-size:11px;text-ali
   padding: calc(5px * var(--table-zoom)) calc(7px * var(--table-zoom)) !important;
   font-size: calc(11.5px * var(--table-zoom)) !important;
 }
+.khsxTable input.thucteInput {
+  font-size: calc(11px * var(--table-zoom)) !important;
+  width: calc(60px * var(--table-zoom)) !important;
+  padding: calc(2px * var(--table-zoom)) calc(4px * var(--table-zoom)) !important;
+}
+#wipContent, #workerContent, #aiChatLog {
+  font-size: calc(12px * var(--table-zoom));
+}
+
+/* Khung bảng KHSX_Dong ở chế độ máy tính */
+#khsxDongTableWrap{ max-height:calc(100vh - 290px); min-height:300px; overflow:auto; -webkit-overflow-scrolling:touch; }
+
+/* ===== Chế độ TOÀN MÀN HÌNH cho 3D, Gantt & KHSX_Dong ===== */
+#pane-khsxDong.khsx-fs{ background:var(--panel); padding:16px 18px; overflow:auto; }
+#pane-khsxDong.khsx-fs #khsxDongTableWrap{ max-height:calc(100vh - 150px); overflow:auto; }
+#pane-khsxDong:fullscreen, #pane-khsxDong:-webkit-full-screen{ background:var(--panel); }
+
+#pane-three.three-fs, #pane-gantt.gantt-fs {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  z-index: 10000 !important;
+  background: var(--bg) !important;
+}
+/* Xoay ngang tự động (Landscape 90°) khi mở Full màn hình 3D / Gantt trên điện thoại cầm dọc */
+#pane-three.three-landscape-fs, #pane-gantt.gantt-landscape-fs {
+  position: fixed !important;
+  top: 0 !important;
+  left: 100vw !important;
+  width: 100dvh !important;
+  height: 100vw !important;
+  transform-origin: 0 0 !important;
+  transform: rotate(90deg) !important;
+  z-index: 10000 !important;
+  background: var(--bg) !important;
+}
 
 /* ===== GIAO DIỆN DI ĐỘNG MÀN HÌNH NHỎ (≤ 900px) ===== */
 @media (max-width: 900px) {
   #mobileDrawerBtn { display: grid !important; }
-  header { padding: 6px 10px; gap: 8px; }
-  header h1 { font-size: 15px; }
+  header { padding: 5px 8px; gap: 6px; }
+  header h1 { font-size: 14.5px; }
   header .sub { display: none; }
   #userBadge { padding: 2px 7px; font-size: 11px; }
-  #userAccountName { max-width: 90px; }
+  #userAccountName { max-width: 85px; }
   #themeBtn { display: none; }
+  .desktop-hint-text { display: none !important; }
 
   #app { height: 100dvh; overflow: hidden; }
   main {
     display: flex;
     flex-direction: column;
-    padding: 6px;
-    height: calc(100dvh - 46px);
+    padding: 4px;
+    height: calc(100dvh - 42px);
     min-height: 0;
     overflow: hidden;
   }
@@ -208,12 +246,14 @@ footer{flex:0 0 auto;padding:7px 14px;color:var(--faint);font-size:11px;text-ali
     overflow: hidden;
   }
   .tabs {
-    padding: 6px 6px 0;
-    gap: 6px;
+    padding: 5px 5px 0;
+    gap: 5px;
+    scroll-snap-type: x proximity;
   }
   .tab {
     padding: 6px 10px;
     font-size: 12px;
+    scroll-snap-align: center;
   }
   .stage {
     margin: 0;
@@ -221,17 +261,73 @@ footer{flex:0 0 auto;padding:7px 14px;color:var(--faint);font-size:11px;text-ali
     min-height: 0;
     border-radius: 0 0 8px 8px;
   }
-  .transport {
-    padding: 6px 8px;
-    gap: 8px;
+
+  /* Thanh điều khiển góc nhìn 3D trên mobile: gọn 1 dòng vuốt ngang */
+  #threeBottomHint {
+    left: 6px !important;
+    right: 6px !important;
+    bottom: 6px !important;
+    padding: 5px 8px !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 6px !important;
   }
-  .transport .clock { font-size: 12px; min-width: 135px; }
+  #threeBottomHint::-webkit-scrollbar { display: none; }
+  .preset-bar-3d { flex-wrap: nowrap !important; }
+
+  /* Ẩn thanh transport mô phỏng khi đang ở các tab bảng số liệu / AI trên điện thoại để nhường diện tích */
+  .viz.hide-transport-mobile .transport {
+    display: none !important;
+  }
+  .transport {
+    padding: 5px 8px;
+    gap: 6px;
+  }
+  .transport .play { width: 34px; height: 34px; font-size: 13px; }
+  .transport .clock { font-size: 11.5px; min-width: 125px; }
   .transport .speed { display: none; }
   #rescheduleBtn { font-size: 10px; padding: 4px 6px; }
   footer { display: none !important; }
 
-  /* Bảng KHSX_Dong trên mobile */
-  #khsxDongTableWrap { max-height: calc(100dvh - 220px); min-height: 200px; }
+  /* Tối ưu không gian & trải nghiệm vuốt 1 khung duy nhất cho KHSX_Dong, WIP, Workers trên điện thoại */
+  #pane-khsxDong {
+    display: flex;
+    flex-direction: column;
+    padding: 6px !important;
+    overflow: hidden !important;
+  }
+  #pane-khsxDong[hidden] { display: none !important; }
+  #pane-khsxDong > div:first-child { margin-bottom: 4px !important; }
+  #pane-khsxDong > div:first-child h3 { font-size: 12.5px !important; }
+  #pane-khsxDong > div:first-child > div:first-child > div { display: none !important; }
+  #khsxTopSubBar {
+    gap: 6px !important;
+    margin-bottom: 4px !important;
+    font-size: 10.5px !important;
+  }
+  #khsxTopSubBar > span:first-child { display: none !important; }
+  #khsxDongTableWrap {
+    flex: 1 !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: auto !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-x pan-y;
+  }
+  #pane-wip, #pane-workers {
+    padding: 8px !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+  #wipContent, #workerContent {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
 
   /* Drawer toàn màn hình cho Cột 1 hoặc Cột 3 khi bấm nút ⚙️ trên điện thoại */
   #app.drawer-open-left #colLeft,
@@ -250,14 +346,3 @@ footer{flex:0 0 auto;padding:7px 14px;color:var(--faint);font-size:11px;text-ali
     display: flex !important;
   }
 }
-
-/* Khung bảng KHSX_Dong: giới hạn chiều cao ở chế độ thường để thanh cuộn ngang
-   luôn nằm trong tầm nhìn (nếu không, bảng cao bằng cả 157 dòng → cuộn ngang bị
-   đẩy xuống tận đáy, không thấy được các ngày cuối như 14-15/11). */
-#khsxDongTableWrap{ max-height:calc(100vh - 290px); min-height:300px; overflow:auto; }
-
-/* ===== Kế hoạch Động: chế độ TOÀN MÀN HÌNH ===== */
-#pane-khsxDong.khsx-fs{ background:var(--panel); padding:16px 18px; overflow:auto; }
-#pane-khsxDong.khsx-fs #khsxDongTableWrap{ max-height:calc(100vh - 150px); overflow:auto; }
-#pane-khsxDong:fullscreen{ background:var(--panel); }
-#pane-khsxDong:-webkit-full-screen{ background:var(--panel); }
