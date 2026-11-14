@@ -6027,6 +6027,21 @@ function computeWipPlan(){
   }
   const machineBuffer = Math.max(0, parseInt((document.getElementById("wipMachineBuffer")||{}).value, 10) || 0);
   const lead = wipLeadMinutes();
+
+  // Xác định công đoạn đầu tiên của từng Part để phân biệt chính xác:
+  // - Công đoạn đầu: Phôi xuất từ Kho BTP cấp ra xưởng lần đầu tiên
+  // - Công đoạn sau: Bán thành phẩm luân chuyển tiếp giữa các máy nội bộ (không xuất thêm từ kho)
+  const firstOpSeqByPart = new Map();
+  const partOpMap = new Map();
+  (model.parts || []).forEach(p => {
+    let minSeq = Infinity;
+    (p.ops || []).forEach(o => {
+      if(o.seq < minSeq) minSeq = o.seq;
+      partOpMap.set(p.id + "|" + o.seq, o.desc || ("CĐ#" + o.seq));
+    });
+    firstOpSeqByPart.set(p.id, isFinite(minSeq) ? minSeq : 1);
+  });
+
   const ivs = (schedule.intervals || []).filter(iv => {
     if(!iv || !(iv.end > iv.start) || iv.mi == null) return false;
     if(wipZoneFilter && wipZoneFilter !== "all"){
@@ -6035,8 +6050,15 @@ function computeWipPlan(){
     }
     return true;
   });
-  // Gắn GIỜ THẬT (theo ca của máy) cho mỗi lô: _rs=bắt đầu hàn, _re=hàn xong
-  ivs.forEach(iv => { iv._rs = realClock(iv.mi, iv.start); iv._re = realClock(iv.mi, iv.end); });
+  // Gắn GIỜ THẬT (theo ca của máy) & phân loại nguồn phôi
+  ivs.forEach(iv => {
+    iv._rs = realClock(iv.mi, iv.start);
+    iv._re = realClock(iv.mi, iv.end);
+    const minS = firstOpSeqByPart.get(iv.part) || 1;
+    iv.isFirstOp = (iv.seq === minS);
+    iv.opDesc = partOpMap.get(iv.part + "|" + iv.seq) || ("CĐ#" + iv.seq);
+    iv.sourceLabel = iv.isFirstOp ? "📦 Xuất Kho BTP" : `🔄 Chuyển tiếp (CĐ#${iv.seq})`;
+  });
   const dayOf = t => Math.floor(t / 1440);  // áp dụng cho GIỜ THẬT (_rs)
 
   // Danh sách hàng chờ tại từng máy (theo thời gian thật)
@@ -6048,16 +6070,44 @@ function computeWipPlan(){
   const cellMap = new Map();
   ivs.forEach(iv => {
     const d = dayOf(iv._rs), k = d + "|" + iv.mi;
-    if(!cellMap.has(k)) cellMap.set(k, { day: d, mi: iv.mi, pcs: 0, lots: 0, parts: new Set(), ivs: [] });
-    const o = cellMap.get(k); o.pcs += (iv.lotQty || 0); o.lots++; o.parts.add(iv.part); o.ivs.push(iv);
+    if(!cellMap.has(k)) cellMap.set(k, {
+      day: d, mi: iv.mi, pcs: 0, rawPcs: 0, transPcs: 0,
+      lots: 0, parts: new Set(), opDescs: new Set(),
+      hasRaw: false, hasTrans: false, ivs: []
+    });
+    const o = cellMap.get(k);
+    const q = (iv.lotQty || 0);
+    o.pcs += q;
+    if(iv.isFirstOp){
+      o.rawPcs += q;
+      o.hasRaw = true;
+    } else {
+      o.transPcs += q;
+      o.hasTrans = true;
+    }
+    o.lots++;
+    o.parts.add(iv.part);
+    o.opDescs.add(iv.opDesc);
+    o.ivs.push(iv);
   });
   const buf = machineBuffer > 0 ? machineBuffer : Infinity;
   const machineCalls = [...cellMap.values()].map(o => {
     const waveList = wipWaveSchedule(o.ivs, buf, o.pcs, lead);
     const whInfo = getMachineWarehouseInfo(o.mi);
+    let srcBadge = "";
+    if(o.hasRaw && !o.hasTrans){
+      srcBadge = `<span style="background:rgba(16,185,129,0.18);color:#10b981;font-weight:700;padding:2px 6px;border-radius:4px;font-size:10.5px;white-space:nowrap">📦 Xuất từ Kho</span>`;
+    } else if(!o.hasRaw && o.hasTrans){
+      srcBadge = `<span style="background:rgba(56,189,248,0.18);color:#38bdf8;font-weight:700;padding:2px 6px;border-radius:4px;font-size:10.5px;white-space:nowrap">🔄 Chuyển tiếp nội bộ</span>`;
+    } else {
+      srcBadge = `<span style="background:rgba(245,158,11,0.18);color:#f59e0b;font-weight:700;padding:2px 6px;border-radius:4px;font-size:10.5px;white-space:nowrap">📦 Kho + 🔄 Chuyển tiếp</span>`;
+    }
     return {
       day: o.day, mi: o.mi, zone: whInfo.zone, whName: whInfo.whName,
-      pcs: o.pcs, lots: o.lots, parts: [...o.parts],
+      pcs: o.pcs, rawPcs: o.rawPcs, transPcs: o.transPcs,
+      hasRaw: o.hasRaw, hasTrans: o.hasTrans, srcBadge,
+      opDescs: [...o.opDescs],
+      lots: o.lots, parts: [...o.parts],
       waves: waveList.length,
       perWave: buf === Infinity ? o.pcs : Math.min(o.pcs, buf),
       waveList, firstCall: waveList[0].call, firstNeed: waveList[0].need
@@ -6069,13 +6119,23 @@ function computeWipPlan(){
   const evByDay = new Map();
   ivs.forEach(iv => {
     const d = dayOf(iv._rs);
-    if(!dayMap.has(d)) dayMap.set(d, { day: d, pcs: 0, lots: 0, parts: new Set(), machines: new Set(), zones: new Set(), ivs: [] });
-    const o = dayMap.get(d); o.pcs += (iv.lotQty || 0); o.lots++; o.parts.add(iv.part); o.machines.add(iv.mi);
+    if(!dayMap.has(d)) dayMap.set(d, {
+      day: d, pcs: 0, rawPcs: 0, transPcs: 0,
+      lots: 0, parts: new Set(), machines: new Set(), zones: new Set(), ivs: []
+    });
+    const o = dayMap.get(d);
+    const q = (iv.lotQty || 0);
+    o.pcs += q;
+    if(iv.isFirstOp) o.rawPcs += q;
+    else o.transPcs += q;
+    o.lots++;
+    o.parts.add(iv.part);
+    o.machines.add(iv.mi);
     o.zones.add(getMachineWarehouseInfo(iv.mi).whName);
     o.ivs.push(iv);
     if(!evByDay.has(d)) evByDay.set(d, []);
-    evByDay.get(d).push({ t: iv._rs, q: iv.lotQty || 0 });
-    evByDay.get(d).push({ t: iv._re, q: -(iv.lotQty || 0) });
+    evByDay.get(d).push({ t: iv._rs, q: q });
+    evByDay.get(d).push({ t: iv._re, q: -q });
   });
   const dayPeak = new Map();
   evByDay.forEach((evs, d) => {
@@ -6086,7 +6146,8 @@ function computeWipPlan(){
   const shiftCalls = [...dayMap.values()].map(o => {
     const waveList = wipWaveSchedule(o.ivs, stagingCap, o.pcs, lead);
     return {
-      day: o.day, pcs: o.pcs, lots: o.lots, parts: [...o.parts], nMachines: o.machines.size,
+      day: o.day, pcs: o.pcs, rawPcs: o.rawPcs, transPcs: o.transPcs,
+      lots: o.lots, parts: [...o.parts], nMachines: o.machines.size,
       whNames: [...o.zones].join(", "),
       stagingCap, callWaves: waveList.length,
       jitPeak: dayPeak.get(o.day) || 0, overCap: (stagingCap > 0 && o.pcs > stagingCap),
@@ -6094,7 +6155,14 @@ function computeWipPlan(){
     };
   }).sort((a, b) => a.day - b.day);
 
-  return { machineCalls, shiftCalls, perMachine, stagingCap, machineBuffer, lead, machines, activeWhLabel };
+  const totalRawPcs = shiftCalls.reduce((s, r) => s + r.rawPcs, 0);
+  const totalTransPcs = shiftCalls.reduce((s, r) => s + r.transPcs, 0);
+  const totalPcs = shiftCalls.reduce((s, r) => s + r.pcs, 0);
+
+  return {
+    machineCalls, shiftCalls, perMachine, stagingCap, machineBuffer, lead, machines,
+    activeWhLabel, totalRawPcs, totalTransPcs, totalPcs
+  };
 }
 
 function renderWipPlan(){
@@ -6103,7 +6171,10 @@ function renderWipPlan(){
   updateWipNowBar();
   const plan = computeWipPlan();
   if(!plan){ host.innerHTML = '<div style="color:var(--muted);font-style:italic;padding:12px">Chưa có lịch. Hãy giải lịch (Heuristic hoặc CP-SAT) trước.</div>'; return; }
-  const { machineCalls, shiftCalls, perMachine, stagingCap, machineBuffer, lead, machines, activeWhLabel } = plan;
+  const {
+    machineCalls, shiftCalls, perMachine, stagingCap, machineBuffer, lead, machines,
+    activeWhLabel, totalRawPcs, totalTransPcs, totalPcs
+  } = plan;
   const nf = n => Number(n || 0).toLocaleString();
 
   const th = 'style="padding:6px 8px;text-align:left;font-size:11px;font-weight:700;background:#064e3b;color:#d1fae5;position:sticky;top:0;white-space:nowrap"';
@@ -6111,33 +6182,46 @@ function renderWipPlan(){
   const tdC = 'style="padding:5px 8px;font-size:11.5px;border-bottom:1px solid var(--line);text-align:center"';
   const tdR = 'style="padding:5px 8px;font-size:11.5px;border-bottom:1px solid var(--line);text-align:right"';
 
-  // Thanh tóm tắt
-  const totalPcs = shiftCalls.reduce((s, r) => s + r.pcs, 0);
+  // Thanh tóm tắt — Phân biệt rõ: Phôi xuất từ kho vs Chuyển tiếp nội bộ
   const anyOver = shiftCalls.some(r => r.overCap);
   let html = `
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-      <div style="flex:1;min-width:140px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px">
+      <div style="flex:1;min-width:130px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px">
         <div style="font-size:10.5px;color:var(--muted)">Kho / Khu vực đang xem</div>
-        <div style="font-size:13.5px;font-weight:700;color:#10b981">${activeWhLabel || "Tất cả Kho BTP"}</div>
+        <div style="font-size:13px;font-weight:700;color:#10b981">${activeWhLabel || "Tất cả Kho BTP"}</div>
       </div>
-      <div style="flex:1;min-width:120px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px">
+      <div style="flex:1;min-width:115px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px">
         <div style="font-size:10.5px;color:var(--muted)">Sức chứa khu chờ</div>
-        <div style="font-size:15px;font-weight:700;color:#059669">${stagingCap > 0 ? nf(stagingCap) + " pcs" : "Không giới hạn"}</div>
+        <div style="font-size:14.5px;font-weight:700;color:#059669">${stagingCap > 0 ? nf(stagingCap) + " pcs" : "Không giới hạn"}</div>
       </div>
-      <div style="flex:1;min-width:120px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px">
+      <div style="flex:1;min-width:115px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px">
         <div style="font-size:10.5px;color:var(--muted)">Buffer mỗi máy</div>
-        <div style="font-size:15px;font-weight:700;color:#0ea5e9">${machineBuffer > 0 ? nf(machineBuffer) + " pcs" : "Không giới hạn"}</div>
+        <div style="font-size:14.5px;font-weight:700;color:#0ea5e9">${machineBuffer > 0 ? nf(machineBuffer) + " pcs" : "Không giới hạn"}</div>
       </div>
-      <div style="flex:1;min-width:120px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px">
-        <div style="font-size:10.5px;color:var(--muted)">Tổng BTP cần gọi</div>
-        <div style="font-size:15px;font-weight:700">${nf(totalPcs)} pcs</div>
+      <div style="flex:1.2;min-width:150px;background:var(--panel-2);border:1px solid #10b981;border-radius:8px;padding:8px 10px" title="Số lượng phôi xuất từ Kho BTP cấp cho công đoạn đầu tiên — Khớp chuẩn 100% Kế hoạch">
+        <div style="font-size:10.5px;color:#10b981;font-weight:700">📦 Phôi xuất kho (CĐ đầu)</div>
+        <div style="font-size:16px;font-weight:800;color:#10b981">${nf(totalRawPcs)} <span style="font-size:11px;font-weight:normal">pcs</span></div>
+        <div style="font-size:9.5px;color:var(--muted)">Khớp đúng 100% Kế hoạch</div>
+      </div>
+      <div style="flex:1.2;min-width:150px;background:var(--panel-2);border:1px solid #38bdf8;border-radius:8px;padding:8px 10px" title="Bán thành phẩm luân chuyển tiếp giữa các máy (từ CĐ1 sang CĐ2...) — KHÔNG xuất thêm phôi từ kho">
+        <div style="font-size:10.5px;color:#38bdf8;font-weight:700">🔄 Chuyển tiếp nội bộ</div>
+        <div style="font-size:16px;font-weight:800;color:#38bdf8">${nf(totalTransPcs)} <span style="font-size:11px;font-weight:normal">pcs</span></div>
+        <div style="font-size:9.5px;color:var(--muted)">Luân chuyển giữa các máy</div>
+      </div>
+      <div style="flex:1;min-width:130px;background:var(--panel-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px" title="Tổng số lượt thao tác gia công trên tất cả các máy = Xuất kho + Chuyển tiếp">
+        <div style="font-size:10.5px;color:var(--muted)">Tổng lượt máy chạy</div>
+        <div style="font-size:15px;font-weight:700">${nf(totalPcs)} lượt</div>
+        <div style="font-size:9.5px;color:var(--muted)">= Xuất kho + Chuyển tiếp</div>
       </div>
     </div>`;
 
   // ★ Danh sách GỌI NGAY / SẮP TỚI theo thời gian thực (từng đợt gọi tới máy)
   const callEvents = [];
   machineCalls.forEach(r => (r.waveList || []).forEach(w => {
-    callEvents.push({ mi: r.mi, day: r.day, wave: w.wave, nWaves: r.waves, need: w.need, call: w.call, pcs: w.pcs, parts: r.parts });
+    callEvents.push({
+      mi: r.mi, day: r.day, wave: w.wave, nWaves: r.waves, need: w.need, call: w.call,
+      pcs: w.pcs, parts: r.parts, srcBadge: r.srcBadge, opDescs: r.opDescs
+    });
   }));
   const liveEvents = callEvents
     .map(e => ({ ...e, st: wipCallStatus(e.need, e.call) }))
@@ -6153,12 +6237,14 @@ function renderWipPlan(){
     html += `<div style="display:flex;flex-direction:column;gap:4px">`;
     liveEvents.forEach(e => {
       const pstr = e.parts.slice(0,3).join(", ") + (e.parts.length > 3 ? ` +${e.parts.length-3}` : "");
+      const opStr = (e.opDescs && e.opDescs.length) ? ` [${e.opDescs.join(', ')}]` : "";
       html += `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:11.5px;padding:3px 0;border-bottom:1px dashed var(--line)">
         <span style="min-width:92px;font-weight:700;color:${e.st.color}">${e.st.label}</span>
         <span class="mono" style="min-width:110px">Gọi lúc <b>${formatClockTime(e.call)}</b></span>
         <span style="color:var(--muted)">→ máy <b style="color:var(--fg)">${machines[e.mi] || ("M"+e.mi)}</b> cần lúc ${formatClockTime(e.need)}</span>
-        <span style="color:var(--muted)">· ${nf(e.pcs)} pcs${e.nWaves>1?` (đợt ${e.wave}/${e.nWaves})`:""}</span>
-        <span style="color:var(--muted)" title="${e.parts.join(', ')}">· ${pstr}</span>
+        <span style="color:var(--muted)">· <b>${nf(e.pcs)} pcs</b>${e.nWaves>1?` (đợt ${e.wave}/${e.nWaves})`:""}</span>
+        <span>${e.srcBadge || ""}</span>
+        <span style="color:var(--muted)" title="${e.parts.join(', ')}">· ${pstr}${opStr}</span>
         <span style="margin-left:auto">${execBtn('machine', `M|${e.day}|${e.mi}|${e.wave}`, e.pcs)}</span>
       </div>`;
     });
@@ -6192,12 +6278,22 @@ function renderWipPlan(){
       ⚠ Một số ca có tổng BTP cần gọi <b>vượt sức chứa khu chờ</b> → phải gọi thành nhiều đợt (JIT), hàn hết đợt trước mới gọi đợt sau. Xem cột "Số đợt gọi".</div>`;
   }
 
-  // Bảng 1: Gọi hàng ra khu chờ theo ca (ngày)
+  // Bảng 1: Gọi hàng ra khu chờ theo ca (ngày) — Thêm phân định Xuất Kho vs Chuyển tiếp
   html += `<h4 style="margin:4px 0 6px 0;font-size:12.5px;color:#059669">① Gọi hàng ra khu chờ — theo từng ca (ngày)</h4>
-    <div style="overflow-x:auto;border:1px solid var(--line);border-radius:8px;margin-bottom:14px"><table style="border-collapse:collapse;width:100%;min-width:660px">
+    <div style="overflow-x:auto;border:1px solid var(--line);border-radius:8px;margin-bottom:14px"><table style="border-collapse:collapse;width:100%;min-width:760px">
     <thead><tr>
-      <th ${th}>Ca (Ngày)</th><th ${th}>Kho BTP cấp</th><th ${th}>Tổng BTP cần (pcs)</th><th ${th}>Sức chứa khu chờ</th>
-      <th ${th}>Số đợt gọi ra khu chờ</th><th ${th}>Giờ gọi muộn nhất (−${lead}p)</th><th ${th}>Đỉnh tồn chờ JIT</th><th ${th}>Số máy</th><th ${th}>Trạng thái (thực tế)</th><th ${th}>Đã cấp ra khu chờ</th>
+      <th ${th}>Ca (Ngày)</th>
+      <th ${th}>Kho BTP cấp</th>
+      <th ${th} title="Số lượng phôi xuất từ Kho BTP cấp cho công đoạn đầu">📦 Xuất Kho (pcs)</th>
+      <th ${th} title="Bán thành phẩm luân chuyển từ công đoạn trước sang">🔄 Chuyển tiếp (pcs)</th>
+      <th ${th} title="Tổng lượt máy gia công = Xuất kho + Chuyển tiếp">Tổng lượt máy</th>
+      <th ${th}>Sức chứa khu chờ</th>
+      <th ${th}>Số đợt gọi</th>
+      <th ${th}>Giờ gọi muộn nhất (−${lead}p)</th>
+      <th ${th}>Đỉnh tồn chờ JIT</th>
+      <th ${th}>Số máy</th>
+      <th ${th}>Trạng thái (thực tế)</th>
+      <th ${th}>Đã cấp ra khu chờ</th>
     </tr></thead><tbody>`;
   shiftCalls.forEach(r => {
     const st = wipCallStatus(r.firstNeed, r.firstCall);
@@ -6206,7 +6302,9 @@ function renderWipPlan(){
     html += `<tr>
       <td ${td}><b>${wipDayLabel(r.day)}</b></td>
       <td ${td} style="color:#10b981;font-weight:600">${r.whNames || "—"}</td>
-      <td ${tdR}><b>${nf(r.pcs)}</b></td>
+      <td ${tdR}><b style="color:#10b981">${nf(r.rawPcs)}</b></td>
+      <td ${tdR}>${r.transPcs > 0 ? `<span style="color:#38bdf8;font-weight:600">${nf(r.transPcs)}</span>` : `<span style="color:var(--muted)">-</span>`}</td>
+      <td ${tdR} style="color:var(--muted)">${nf(r.pcs)}</td>
       <td ${tdC}>${stagingCap > 0 ? nf(stagingCap) : "—"}</td>
       <td ${tdC}>${r.callWaves}${r.overCap ? '' : ''}</td>
       <td ${td} class="mono" style="font-size:10.5px">${wavesTxt}</td>
@@ -6218,12 +6316,23 @@ function renderWipPlan(){
   });
   html += `</tbody></table></div>`;
 
-  // Bảng 2: Gọi hàng tới từng máy (ngày × máy) với buffer + kanban
+  // Bảng 2: Gọi hàng tới từng máy (ngày × máy) với buffer + kanban + Phân loại nguồn phôi
   html += `<h4 style="margin:4px 0 6px 0;font-size:12.5px;color:#0ea5e9">② Gọi hàng tới từng máy — buffer & kéo lô (hàn hết lấy tiếp)</h4>
-    <div style="overflow-x:auto;border:1px solid var(--line);border-radius:8px;margin-bottom:14px"><table style="border-collapse:collapse;width:100%;min-width:680px">
+    <div style="overflow-x:auto;border:1px solid var(--line);border-radius:8px;margin-bottom:14px"><table style="border-collapse:collapse;width:100%;min-width:760px">
     <thead><tr>
-      <th ${th}>Ca (Ngày)</th><th ${th}>Phân xưởng / Kho</th><th ${th}>Máy</th><th ${th}>Ca máy</th><th ${th}>BTP cần (pcs)</th>
-      <th ${th}>Buffer máy</th><th ${th}>Số đợt (hàn hết lấy tiếp)</th><th ${th}>Giờ gọi muộn nhất (−${lead}p) · SL</th><th ${th}>Trạng thái</th><th ${th}>Đã cấp ra máy (thực tế)</th><th ${th}>Part</th>
+      <th ${th}>Ca (Ngày)</th>
+      <th ${th}>Phân xưởng / Kho</th>
+      <th ${th}>Máy</th>
+      <th ${th}>Ca máy</th>
+      <th ${th}>BTP cần (pcs)</th>
+      <th ${th}>Nguồn phôi</th>
+      <th ${th}>Công đoạn</th>
+      <th ${th}>Buffer máy</th>
+      <th ${th}>Số đợt (hàn hết lấy tiếp)</th>
+      <th ${th}>Giờ gọi muộn nhất (−${lead}p) · SL</th>
+      <th ${th}>Trạng thái</th>
+      <th ${th}>Đã cấp ra máy (thực tế)</th>
+      <th ${th}>Part</th>
     </tr></thead><tbody>`;
   machineCalls.forEach(r => {
     const partStr = r.parts.slice(0, 4).join(", ") + (r.parts.length > 4 ? ` +${r.parts.length - 4}` : "");
@@ -6235,7 +6344,9 @@ function renderWipPlan(){
       <td ${td}><span style="font-size:10.5px;color:var(--muted)">${r.zone || ""}</span><br><b style="color:#10b981;font-size:10.5px">📦 ${r.whName || ""}</b></td>
       <td ${td}><b>${machines[r.mi] || ("M" + r.mi)}</b></td>
       <td ${tdC}>${wipShiftCode(r.mi)}</td>
-      <td ${tdR}>${nf(r.pcs)}</td>
+      <td ${tdR}><b>${nf(r.pcs)}</b></td>
+      <td ${tdC}>${r.srcBadge}</td>
+      <td ${td} style="font-size:11px;color:var(--fg);max-width:160px">${r.opDescs.join(", ")}</td>
       <td ${tdC}>${machineBuffer > 0 ? nf(machineBuffer) : "—"}</td>
       <td ${tdC}><b>${r.waves}</b></td>
       <td ${td} class="mono" style="font-size:10.5px">${wavesTxt}</td>
@@ -6248,10 +6359,18 @@ function renderWipPlan(){
 
   // Bảng 3 (thu gọn): Chi tiết hàng chờ tại từng máy theo thời gian
   html += `<details style="margin-bottom:8px"><summary style="cursor:pointer;font-size:12.5px;font-weight:700;color:var(--muted)">③ Chi tiết trình tự hàng chờ tại từng máy (bấm để mở)</summary>
-    <div style="overflow-x:auto;border:1px solid var(--line);border-radius:8px;margin-top:8px"><table style="border-collapse:collapse;width:100%;min-width:640px">
+    <div style="overflow-x:auto;border:1px solid var(--line);border-radius:8px;margin-top:8px"><table style="border-collapse:collapse;width:100%;min-width:720px">
     <thead><tr>
-      <th ${th}>Máy</th><th ${th}>Ca máy</th><th ${th}>Gọi muộn nhất (−${lead}p)</th><th ${th}>Cần có hàng lúc</th><th ${th}>Part</th>
-      <th ${th}>Lô</th><th ${th}>SL (pcs)</th><th ${th}>Công đoạn</th><th ${th}>Hàn xong lúc</th><th ${th}>Hàn xong (thực tế)</th>
+      <th ${th}>Máy</th>
+      <th ${th}>Ca máy</th>
+      <th ${th}>Gọi muộn nhất (−${lead}p)</th>
+      <th ${th}>Cần có hàng lúc</th>
+      <th ${th}>Part</th>
+      <th ${th}>Lô</th>
+      <th ${th}>SL (pcs)</th>
+      <th ${th}>Nguồn & Công đoạn</th>
+      <th ${th}>Hàn xong lúc</th>
+      <th ${th}>Hàn xong (thực tế)</th>
     </tr></thead><tbody>`;
   perMachine.forEach((lots, mi) => {
     lots.forEach(iv => {
@@ -6259,15 +6378,18 @@ function renderWipPlan(){
       const endR = (iv._re != null) ? iv._re : realClock(mi, iv.end);
       const callT = Math.max(0, need - lead);
       const st = wipCallStatus(need, callT);
+      const srcText = iv.isFirstOp
+        ? `<span style="color:#10b981;font-weight:700">📦 Xuất kho</span> · ${iv.opDesc}`
+        : `<span style="color:#38bdf8;font-weight:700">🔄 Chuyển tiếp</span> · ${iv.opDesc}`;
       html += `<tr>
         <td ${td}><b>${machines[mi] || ("M" + mi)}</b></td>
         <td ${tdC}>${wipShiftCode(mi)}</td>
         <td ${td} class="mono"><span style="color:${st.color}">${formatClockTime(callT)}</span></td>
         <td ${td}>${formatClockTime(need)}</td>
-        <td ${td}>${iv.part}</td>
+        <td ${td}><b>${iv.part}</b></td>
         <td ${tdC}>#${iv.unit}</td>
-        <td ${tdR}>${nf(iv.lotQty)}</td>
-        <td ${tdC}>${iv.seq}</td>
+        <td ${tdR}><b>${nf(iv.lotQty)}</b></td>
+        <td ${td} style="font-size:11px">${srcText}</td>
         <td ${td}>${formatClockTime(endR)}</td>
         <td ${td}>${execBtn('ops', opKeyOf(iv), iv.lotQty)}</td>
       </tr>`;
@@ -6288,19 +6410,31 @@ function exportWipExcel(){
     const waveDetailStr = r => (r.waveList || []).map(w => `${formatClockTime(w.call)} (${w.pcs})`).join(" | ");
     const leadHdr = `Giờ gọi muộn nhất (−${lead}p)`;
 
-    const s1 = [["Ca (Ngày)", "Kho BTP cấp", "Tổng BTP cần (pcs)", "Sức chứa khu chờ", "Số đợt gọi ra khu chờ", leadHdr + " - các đợt", "Đỉnh tồn chờ JIT (pcs)", "Số máy", "Số lô", "Trạng thái"]];
-    shiftCalls.forEach(r => s1.push([wipDayLabel(r.day), r.whNames || "", r.pcs, stagingCap || "", r.callWaves, waveCallsStr(r), r.jitPeak, r.nMachines, r.lots, r.overCap ? ("Gọi " + r.callWaves + " đợt") : "Gọi 1 lần"]));
+    const s1 = [["Ca (Ngày)", "Kho BTP cấp", "Xuất Kho BTP (pcs)", "Chuyển tiếp nội bộ (pcs)", "Tổng lượt máy", "Sức chứa khu chờ", "Số đợt gọi ra khu chờ", leadHdr + " - các đợt", "Đỉnh tồn chờ JIT (pcs)", "Số máy", "Số lô", "Trạng thái"]];
+    shiftCalls.forEach(r => s1.push([
+      wipDayLabel(r.day), r.whNames || "", r.rawPcs, r.transPcs, r.pcs,
+      stagingCap || "", r.callWaves, waveCallsStr(r), r.jitPeak, r.nMachines, r.lots,
+      r.overCap ? ("Gọi " + r.callWaves + " đợt") : "Gọi 1 lần"
+    ]));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(s1), "GoiHang_TheoCa");
 
-    const s2 = [["Ca (Ngày)", "Phân xưởng", "Kho BTP", "Máy", "Ca máy", "BTP cần (pcs)", "Buffer máy", "Số đợt (hàn hết lấy tiếp)", leadHdr + " · SL từng đợt", "Part"]];
-    machineCalls.forEach(r => s2.push([wipDayLabel(r.day), r.zone || "", r.whName || "", machines[r.mi] || ("M" + r.mi), wipShiftCode(r.mi), r.pcs, machineBuffer || "", r.waves, waveDetailStr(r), r.parts.join(", ")]));
+    const s2 = [["Ca (Ngày)", "Phân xưởng", "Kho BTP", "Máy", "Ca máy", "BTP cần (pcs)", "Nguồn phôi", "Công đoạn", "Buffer máy", "Số đợt (hàn hết lấy tiếp)", leadHdr + " · SL từng đợt", "Part"]];
+    machineCalls.forEach(r => s2.push([
+      wipDayLabel(r.day), r.zone || "", r.whName || "", machines[r.mi] || ("M" + r.mi), wipShiftCode(r.mi),
+      r.pcs, r.hasRaw && !r.hasTrans ? "Xuất từ Kho" : (!r.hasRaw && r.hasTrans ? "Chuyển tiếp nội bộ" : "Kho + Chuyển tiếp"),
+      r.opDescs.join(", "), machineBuffer || "", r.waves, waveDetailStr(r), r.parts.join(", ")
+    ]));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(s2), "GoiHang_TungMay");
 
-    const s3 = [["Máy", "Ca máy", leadHdr, "Cần có hàng lúc", "Part", "Lô", "SL (pcs)", "Công đoạn", "Hàn xong lúc"]];
+    const s3 = [["Máy", "Ca máy", leadHdr, "Cần có hàng lúc", "Part", "Lô", "SL (pcs)", "Công đoạn", "Nguồn phôi", "Hàn xong lúc"]];
     perMachine.forEach((lots, mi) => lots.forEach(iv => {
       const need = (iv._rs != null) ? iv._rs : realClock(mi, iv.start);
       const endR = (iv._re != null) ? iv._re : realClock(mi, iv.end);
-      s3.push([machines[mi] || ("M" + mi), wipShiftCode(mi), formatClockTime(Math.max(0, need - lead)), formatClockTime(need), iv.part, "#" + iv.unit, iv.lotQty, iv.seq, formatClockTime(endR)]);
+      s3.push([
+        machines[mi] || ("M" + mi), wipShiftCode(mi), formatClockTime(Math.max(0, need - lead)),
+        formatClockTime(need), iv.part, "#" + iv.unit, iv.lotQty, iv.opDesc || ("CĐ#" + iv.seq),
+        iv.isFirstOp ? "Xuất từ Kho BTP" : "Chuyển tiếp nội bộ", formatClockTime(endR)
+      ]);
     }));
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(s3), "HangCho_ChiTiet");
 
