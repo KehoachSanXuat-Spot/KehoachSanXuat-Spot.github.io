@@ -328,11 +328,19 @@
                 </button>
               </div>
             </div>
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;font-size:11px;color:var(--muted);flex-wrap:wrap">
+            <div id="khsxTopSubBar" style="display:flex;align-items:center;gap:12px;margin-bottom:8px;font-size:11px;color:var(--muted);flex-wrap:wrap">
               <span>✏️ Sửa trực tiếp cột <b style="color:var(--fg)">Thực tế</b> ngay trong bảng → tự lưu vào Excel gốc.</span>
               <label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;white-space:nowrap">
                 <input type="checkbox" id="khsxAutoSolve" checked style="margin:0">
                 <span>🔄 Tự giải lại lịch sau khi sửa</span>
+              </label>
+              <label style="display:inline-flex;align-items:center;gap:5px;white-space:nowrap">
+                <span style="color:var(--fg);font-weight:600">📅 Xếp phần Còn lại:</span>
+                <select id="khsxRollModeSelect" style="padding:3px 7px;font-size:11px;background:var(--panel-2);border:1px solid #f59e0b;border-radius:5px;color:var(--fg);font-weight:600;cursor:pointer" title="Chọn cách phân bổ số lượng Còn lại để không bao giờ xếp lùi về các ngày đã qua">
+                  <option value="auto_today">🛡️ Từ Hôm nay (Khóa ngày quá khứ)</option>
+                  <option value="keep_fifo">📌 Giữ lịch gốc (Trừ Thực tế & Dồn về Hôm nay)</option>
+                  <option value="from_start">🗓️ Từ ngày đầu kỳ kế hoạch</option>
+                </select>
               </label>
               <span id="khsxSaveStatus" style="font-weight:600"></span>
             </div>
@@ -556,9 +564,9 @@
   <footer>Bộ lập lịch heuristic client-side · để lấy lịch tối ưu dùng mô hình OR-Tools CP-SAT (file Python kèm theo)</footer>
 </div>
 
-<script>window.APP_BUILD_ID="d4672cccdc";</script>
+<script>window.APP_BUILD_ID="ganttfix02";</script>
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.10.0/lib/msal-browser.min.js" integrity="sha384-yXVL3cgcbuPa1TOmTYdr5MVOeFWnnXoYXcSIPBJ4lrnGHn8EZrbyurhG/xZMygBB" crossorigin="anonymous"></script>
-<script src="./config.js?v=d4672cccdc"></script>
-<script src="./auth.js?v=d4672cccdc"></script>
-<script src="./api-shim.js?v=d4672cccdc"></script>
-<script src="./gate.js?v=d4672cccdc"></script>
+<script src="./config.js?v=ganttfix02"></script>
+<script src="./auth.js?v=ganttfix02"></script>
+<script src="./api-shim.js?v=ganttfix02"></script>
+<script src="./gate.js?v=ganttfix02"></script>
