@@ -336,7 +336,8 @@ const SAMPLE = {
       {seq:1,wsTag:"DataSetting_Dap",choices:[{m:"Dap-160T",time:7},{m:"Dap-250T",time:7}]},
       {seq:2,wsTag:"DataSetting_Spot",choices:[{m:"Spot5",time:14},{m:"Spot6",time:12}]},
       {seq:3,wsTag:"DataSetting_MAG",choices:[{m:"Robot-MAG-1",time:16},{m:"Robot-MAG-3",time:15}]}]}
-  ]
+  ],
+  isSample: true
 };
 
 let model=null, schedule=null, sim={t:0,end:1,playing:false,speed:1,liveMode:false,realRatio:0};
@@ -1169,7 +1170,7 @@ function computeCalendarEnd(rawStart, duration, mi, breaks, dts, preBlocks){
   let s = rawStart;
   let changed = true;
   let guard = 0;
-  while(changed && guard++ < 60){
+  while(changed && guard++ < 200){
     changed = false;
     for(const b of mBlocks){
       if(s >= b.start && s < b.end){ s = b.end; changed = true; break; }
@@ -1184,7 +1185,7 @@ function computeCalendarEnd(rawStart, duration, mi, breaks, dts, preBlocks){
   let cur = s;
   let rem = duration;
   let loopGuard = 0;
-  while(rem > 0 && loopGuard++ < 120){
+  while(rem > 0 && loopGuard++ < 400){
     let nextBlock = null;
     let nextStart = Infinity;
     for(const b of mBlocks){
@@ -1297,7 +1298,8 @@ function solve(model, opts){
   const wJobs = new Array(workers.length).fill(0);
 
   // Tiền xử lý dữ liệu chuẩn hóa của Máy & Công nhân (1 lần duy nhất thay vì tính lại hàng triệu lần trong vòng lặp)
-  const allMachineBlocks = machines.map((_, mi) => getMachineBlocks(mi, 60));
+  const maxDaysForBlocks = Math.max(60, Math.ceil((minStartTime || 0) / 1440) + 45);
+  const allMachineBlocks = machines.map((_, mi) => getMachineBlocks(mi, maxDaysForBlocks));
   const mNormArr = machines.map(m => strip(m || "").toLowerCase().replace(/[-_ ]/g, ""));
   const mZoneNormArr = machines.map((_, mi) => strip((model.machineZones && model.machineZones[mi]) ? model.machineZones[mi] : "Xưởng Hàn Spot"));
   const wMeta = workers.map((w, wIdx) => ({
@@ -4070,15 +4072,41 @@ function roundRect(x,a,b,w,h,r){ r=Math.min(r,w/2,h/2); x.beginPath();
    ============================================================ */
 let ganttHoveredIv = null;
 
+function getDateLabelForDayIndex(d){
+  if(model && model.dateLabels && model.dateLabels[d]) return model.dateLabels[d];
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  if(model && model.dateLabels && model.dateLabels.length > 0){
+    const m = String(model.dateLabels[0]).match(/(\d{1,2})[-/]([A-Za-z]{3}|\d{1,2})/i);
+    if(m){
+      const day0 = parseInt(m[1], 10);
+      const ms = m[2].toLowerCase();
+      let month0 = parseInt(ms, 10);
+      if(isNaN(month0)) month0 = MONTHS.map(x=>x.toLowerCase()).indexOf(ms.slice(0,3)) + 1;
+      if(month0 >= 1 && day0 >= 1){
+        const dt = new Date(new Date().getFullYear(), month0 - 1, day0 + d);
+        const dd = dt.getDate();
+        return (dd < 10 ? '0' : '') + dd + '-' + MONTHS[dt.getMonth()];
+      }
+    }
+  }
+  return `Ngày ${d+1}`;
+}
+
 function getEffectiveGanttSched(){
   if(schedule && schedule.intervals && schedule.intervals.length > 0 && schedule.makespan > 0){
-    return { sched: schedule, isRefFallback: false, makespan: Math.max(60, schedule.makespan) };
+    let minS = Infinity;
+    for(let i = 0; i < schedule.intervals.length; i++){
+      if(schedule.intervals[i].start < minS) minS = schedule.intervals[i].start;
+    }
+    const startDay = (minS < Infinity && minS >= 1440) ? Math.floor(minS / 1440) : 0;
+    const startMin = startDay * 1440;
+    return { sched: schedule, isRefFallback: false, makespan: Math.max(startMin + 60, schedule.makespan), startMin, startDay };
   }
   const ref = getPlanRefSched();
   if(ref && ref.intervals && ref.intervals.length > 0 && ref.makespan > 0){
-    return { sched: ref, isRefFallback: true, makespan: Math.max(60, ref.makespan) };
+    return { sched: ref, isRefFallback: true, makespan: Math.max(60, ref.makespan), startMin: 0, startDay: 0 };
   }
-  return { sched: schedule, isRefFallback: false, makespan: Math.max(540, (schedule && schedule.makespan) || 540) };
+  return { sched: schedule, isRefFallback: false, makespan: Math.max(540, (schedule && schedule.makespan) || 540), startMin: 0, startDay: 0 };
 }
 
 function renderGantt(){
@@ -4091,12 +4119,13 @@ function renderGantt(){
   const x=cv.getContext("2d"); x.setTransform(dpr,0,0,dpr,0,0);
   x.clearRect(0,0,w,h);
 
-  const { sched: gSched, isRefFallback, makespan: effMakespan } = getEffectiveGanttSched();
+  const { sched: gSched, isRefFallback, makespan: effMakespan, startMin = 0, startDay = 0 } = getEffectiveGanttSched();
+  const spanMin = Math.max(60, effMakespan - startMin);
   const fg=cssVar("--fg"),muted=cssVar("--muted"),line=cssVar("--line"),hot=cssVar("--hot"),good=cssVar("--good");
   const labW=92, padT=34, padB=28, N=Math.max(1, model.machines.length);
   const rowH=Math.max(12,Math.min(28,(h-padT-padB)/N));
-  const scale=(w-labW-14)/Math.max(1,effMakespan);
-  const numDays = Math.min(365, Math.max(1, Math.ceil(effMakespan / 1440) || 1));
+  const scale=(w-labW-14)/spanMin;
+  const endDay = Math.min(startDay + 365, Math.max(startDay + 1, Math.ceil(effMakespan / 1440) || 1));
 
   // 1. Nền hàng máy xen kẽ (Zebra rows) để dễ theo dõi từng máy
   for(let i=0; i<N; i++){
@@ -4110,7 +4139,7 @@ function renderGantt(){
 
   // 2. Vùng nghỉ ca & Vùng hết ca theo từng máy
   const mShifts = model.machines.map((_, i) => getMachineShiftInfo(i));
-  for(let d=0; d<numDays; d++){
+  for(let d=startDay; d<endDay; d++){
     const dayOffset = d * 1440;
     for(let i=0; i<N; i++){
       const mSh = mShifts[i];
@@ -4118,10 +4147,10 @@ function renderGantt(){
 
       if(mSh.breaks){
         mSh.breaks.forEach(b => {
-          const bs = dayOffset + b.start;
+          const bs = Math.max(startMin, dayOffset + b.start);
           const be = dayOffset + b.end;
-          if(bs < effMakespan){
-            const bx = labW + bs * scale;
+          if(bs < effMakespan && be > bs){
+            const bx = labW + (bs - startMin) * scale;
             const bw = Math.max(2, (Math.min(be, effMakespan) - bs) * scale);
             x.fillStyle = "rgba(100, 116, 139, 0.22)";
             x.fillRect(bx, gy, bw, rowH);
@@ -4130,10 +4159,10 @@ function renderGantt(){
       }
 
       if(mSh.shiftLength < 1440){
-        const nightS = dayOffset + mSh.shiftLength;
+        const nightS = Math.max(startMin, dayOffset + mSh.shiftLength);
         const nightE = dayOffset + 1440;
-        if(nightS < effMakespan){
-          const nx = labW + nightS * scale;
+        if(nightS < effMakespan && nightE > nightS){
+          const nx = labW + (nightS - startMin) * scale;
           const nw = Math.max(2, (Math.min(nightE, effMakespan) - nightS) * scale);
           x.fillStyle = "rgba(15, 23, 42, 0.42)";
           x.fillRect(nx, gy, nw, rowH);
@@ -4149,11 +4178,11 @@ function renderGantt(){
   x.lineWidth = 1;
   x.beginPath(); x.moveTo(0, padT - 4); x.lineTo(w, padT - 4); x.stroke();
 
-  for(let d=0; d<numDays; d++){
+  for(let d=startDay; d<endDay; d++){
     const dayStart = d * 1440;
     const dayEnd = (d + 1) * 1440;
-    const sx = labW + dayStart * scale;
-    const ex = Math.min(w, labW + dayEnd * scale);
+    const sx = labW + (dayStart - startMin) * scale;
+    const ex = Math.min(w, labW + (dayEnd - startMin) * scale);
     const boxW = ex - sx;
 
     // Vạch chia ngày từ trên xuống dưới
@@ -4162,7 +4191,7 @@ function renderGantt(){
     x.beginPath(); x.moveTo(sx, 0); x.lineTo(sx, padT + N * rowH); x.stroke();
 
     if(boxW > 25){
-      const dateLabel = (model.dateLabels && model.dateLabels[d]) ? model.dateLabels[d] : `Ngày ${d+1}`;
+      const dateLabel = getDateLabelForDayIndex(d);
       x.fillStyle = "#93c5fd";
       x.font = "bold 11px 'IBM Plex Sans',sans-serif";
       x.textAlign = "center";
@@ -4200,10 +4229,10 @@ function renderGantt(){
   x.fillStyle = muted;
   x.textAlign = "center";
   x.textBaseline = "top";
-  const step = Math.max(1, niceStep(effMakespan));
+  const step = Math.max(1, niceStep(spanMin));
   let tickGuard = 0;
-  for(let tt=0; tt<=effMakespan+0.5 && tickGuard++ < 200; tt+=step){
-    const gx = labW + tt * scale;
+  for(let tt=startMin; tt<=effMakespan+0.5 && tickGuard++ < 200; tt+=step){
+    const gx = labW + (tt - startMin) * scale;
     x.globalAlpha = 0.35;
     x.beginPath(); x.moveTo(gx, padT); x.lineTo(gx, padT + N * rowH); x.stroke();
     x.globalAlpha = 1;
@@ -4215,10 +4244,11 @@ function renderGantt(){
 
   // 6. Vùng sự cố máy (Downtimes)
   downtimes.forEach(dt => {
-    if(dt.mi < N && dt.start < effMakespan){
+    if(dt.mi < N && dt.start < effMakespan && dt.end > startMin){
       const gy = padT + dt.mi * rowH;
-      const bx = labW + dt.start * scale;
-      const bw = Math.max(3, (Math.min(dt.end, effMakespan) - dt.start) * scale);
+      const ds = Math.max(startMin, dt.start);
+      const bx = labW + (ds - startMin) * scale;
+      const bw = Math.max(3, (Math.min(dt.end, effMakespan) - ds) * scale);
       x.fillStyle = "rgba(232, 97, 31, 0.4)";
       roundRect(x, bx, gy+2, bw, rowH-4, 3);
       x.fill();
@@ -4240,8 +4270,10 @@ function renderGantt(){
   for(let i=0; i<N; i++){
     const gy = padT + i * rowH;
     (perMach[i] || []).forEach(iv => {
-      const bx = labW + iv.start * scale;
-      const bw = Math.max(3, (iv.end - iv.start) * scale);
+      if(iv.end <= startMin) return;
+      const is = Math.max(startMin, iv.start);
+      const bx = labW + (is - startMin) * scale;
+      const bw = Math.max(3, (iv.end - is) * scale);
       const isHovered = (ganttHoveredIv === iv);
 
       x.fillStyle = partColor(iv.pi);
@@ -4281,8 +4313,8 @@ function renderGantt(){
 
   // 8. Cờ hạn giao (Due Date Markers)
   model.parts.forEach(p => {
-    if(p.dueDate && p.dueDate <= effMakespan){
-      const dx = labW + p.dueDate * scale;
+    if(p.dueDate && p.dueDate >= startMin && p.dueDate <= effMakespan){
+      const dx = labW + (p.dueDate - startMin) * scale;
       x.save();
       x.strokeStyle = "rgba(239, 68, 68, 0.85)";
       x.lineWidth = 1.5;
@@ -4300,7 +4332,8 @@ function renderGantt(){
   });
 
   // 9. Vạch thời gian mô phỏng hiện tại
-  const cx = labW + Math.min(effMakespan, Math.max(0, sim.t)) * scale;
+  const clampedSimT = Math.min(effMakespan, Math.max(startMin, sim.t));
+  const cx = labW + (clampedSimT - startMin) * scale;
   x.strokeStyle = hot;
   x.lineWidth = 2;
   x.beginPath(); x.moveTo(cx, padT - 4); x.lineTo(cx, padT + N * rowH + 2); x.stroke();
@@ -4619,6 +4652,7 @@ function renderOutChart(){
 
 /* ============================================================
    KẾ HOẠCH SẢN XUẤT ĐỘNG THEO NGÀY (KHSX_Dong) — Hỗ trợ lọc theo từng Phân xưởng (KhuVuc)
+   & Chống xếp lịch ngược vào ngày quá khứ khi cập nhật Thực tế (Rolling Schedule Anchor)
    ============================================================ */
 let khsxSortCol = "stt";
 let khsxSortAsc = true;
@@ -4628,41 +4662,113 @@ let khsxPage = 1;
 let khsxZoneFilter = "all";
 let khsxPriorityFilter = "all";
 let khsxStatusFilter = "all";
+// Chế độ mốc ngày xếp lịch phần còn lại:
+//   "auto_today" (mặc định): Khóa các ngày đã qua (< Hôm nay), chỉ xếp sản lượng Còn lại từ Hôm nay trở đi
+//   "keep_fifo"            : Giữ nguyên lịch gốc từng ngày, trừ Thực tế từ ngày đầu (FIFO) và dồn phần quá hạn về Hôm nay
+//   "from_start"           : Xếp từ ngày đầu kỳ kế hoạch (t = 0)
+//   "day_k"                : Xếp từ cột ngày thứ k do người dùng chọn
+let khsxRollMode = "auto_today";
+try {
+  const _savedRollMode = localStorage.getItem("xuong_spot_roll_mode");
+  if(_savedRollMode) khsxRollMode = _savedRollMode;
+} catch(e){}
+
+const _KHSX_MONTHS_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function _parseKhsxDM(str){
+  if(!str) return null;
+  const m = String(str).match(/(\d{1,2})[-/]([A-Za-z]{3}|\d{1,2})/i);
+  if(!m) return null;
+  const day = parseInt(m[1], 10);
+  const ms = m[2].toLowerCase();
+  let month = parseInt(ms, 10);
+  if(isNaN(month)) month = _KHSX_MONTHS_ABBR.map(x=>x.toLowerCase()).indexOf(ms.slice(0,3)) + 1;
+  if(!month || month < 1 || !day) return null;
+  return { day, month };
+}
+
+function getHanoiTodayDM(){
+  try {
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Ho_Chi_Minh",
+      year: "numeric", month: "numeric", day: "numeric"
+    });
+    const parts = fmt.formatToParts(new Date());
+    let y = new Date().getFullYear(), m = new Date().getMonth() + 1, d = new Date().getDate();
+    parts.forEach(p => {
+      if(p.type === "year") y = parseInt(p.value, 10);
+      if(p.type === "month") m = parseInt(p.value, 10);
+      if(p.type === "day") d = parseInt(p.value, 10);
+    });
+    return { year: y, month: m, day: d };
+  } catch(e){
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() + 1, day: now.getDate() };
+  }
+}
+
+function getTodayDayIndex(m){
+  const mdl = m || model;
+  if(!mdl || mdl.isSample) return 0;
+  let baseDM = null;
+  if(mdl.dateLabels && mdl.dateLabels.length > 0){
+    baseDM = _parseKhsxDM(mdl.dateLabels[0]);
+  }
+  if(!baseDM && mdl.parts && mdl.parts.length > 0){
+    for(const p of mdl.parts){
+      const dm = _parseKhsxDM(formatExcelDateValue(p.startDate || ""));
+      if(dm){ baseDM = dm; break; }
+    }
+  }
+  if(!baseDM) return 0;
+  const today = getHanoiTodayDM();
+  const baseDate = new Date(today.year, baseDM.month - 1, baseDM.day);
+  const todayDate = new Date(today.year, today.month - 1, today.day);
+  const diffDays = Math.round((todayDate - baseDate) / 86400000);
+  if(diffDays <= 0 || diffDays > 90) return 0;
+  return diffDays;
+}
+
+function getEffectiveAnchorDayIdx(m){
+  const mdl = m || model;
+  if(!mdl || mdl.isSample) return 0;
+  if(khsxRollMode === "from_start") return 0;
+  if(typeof khsxRollMode === "string" && khsxRollMode.startsWith("day_")){
+    const idx = parseInt(khsxRollMode.slice(4), 10);
+    return (isFinite(idx) && idx >= 0) ? idx : 0;
+  }
+  // Mặc định ("auto_today" hoặc "keep_fifo"): neo theo ngày Hôm nay
+  return getTodayDayIndex(mdl);
+}
+
+function getEffectiveMinStartTime(m){
+  const mdl = m || model;
+  if(!mdl || mdl.isSample) return 0;
+  if(khsxRollMode === "from_start" || khsxRollMode === "keep_fifo") return 0;
+  const anchorIdx = getEffectiveAnchorDayIdx(mdl);
+  return Math.max(0, anchorIdx * 1440);
+}
 
 function computeKHSXDongData(schedule, model){
   if(!schedule || !model || !model.parts) return null;
 
   let dateLabels = (model.dateLabels && model.dateLabels.length > 0) ? [...model.dateLabels] : [];
   const maxDay = Math.ceil(schedule.makespan / 1440);
+  const todayDayIdx = getTodayDayIndex(model);
+  const anchorDayIdx = getEffectiveAnchorDayIdx(model);
 
-  // --- Mở rộng danh sách cột ngày để phủ HẾT kế hoạch (tới mốc Hạn giao muộn nhất) ---
-  // Nhiều file chỉ có sẵn vài cột ngày (06-Nov..13-Nov) nhưng Hạn giao lại tới 15-Nov.
-  // Ta tự sinh tiếp các nhãn ngày lịch thật (14-Nov, 15-Nov...) để hiển thị đủ.
-  const _MONTHS_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const _parseDM = (str) => {
-    if(!str) return null;
-    const m = String(str).match(/(\d{1,2})[-/]([A-Za-z]{3}|\d{1,2})/i);
-    if(!m) return null;
-    const day = parseInt(m[1], 10);
-    const ms = m[2].toLowerCase();
-    let month = parseInt(ms, 10);
-    if(isNaN(month)) month = _MONTHS_ABBR.map(x=>x.toLowerCase()).indexOf(ms.slice(0,3)) + 1;
-    if(!month || month < 1 || !day) return null;
-    return { day, month };
-  };
+  // --- Mở rộng danh sách cột ngày để phủ HẾT kế hoạch (tới mốc Hạn giao muộn nhất & ngày Hôm nay) ---
   const _fmtDM = (date) => {
     const d = date.getDate();
-    return (d < 10 ? '0' : '') + d + '-' + _MONTHS_ABBR[date.getMonth()];
+    return (d < 10 ? '0' : '') + d + '-' + _KHSX_MONTHS_ABBR[date.getMonth()];
   };
   const _year = new Date().getFullYear();
-  const _baseDM = dateLabels.length ? _parseDM(dateLabels[0]) : null;
+  const _baseDM = dateLabels.length ? _parseKhsxDM(dateLabels[0]) : null;
   const _baseDate = _baseDM ? new Date(_year, _baseDM.month - 1, _baseDM.day) : null;
-  // Chỉ số ngày (cột) muộn nhất mà Hạn giao yêu cầu
   let _maxDueIdx = 0;
   if(_baseDate){
     model.parts.forEach(p => {
       const sDue = formatExcelDateValue(p.dueDateStr || (p.dueDate ? formatClockTime(p.dueDate) : ""));
-      const dm = _parseDM(sDue);
+      const dm = _parseKhsxDM(sDue);
       if(dm){
         const dt = new Date(_year, dm.month - 1, dm.day);
         const idx = Math.round((dt - _baseDate) / 86400000);
@@ -4670,7 +4776,7 @@ function computeKHSXDongData(schedule, model){
       }
     });
   }
-  const _needLen = Math.min(120, Math.max(dateLabels.length, 10, maxDay, _maxDueIdx + 1));
+  const _needLen = Math.min(120, Math.max(dateLabels.length, 10, maxDay, _maxDueIdx + 1, anchorDayIdx + 2, todayDayIdx + 2));
   while(dateLabels.length < _needLen){
     if(_baseDate){
       const dt = new Date(_baseDate.getTime() + dateLabels.length * 86400000);
@@ -4706,6 +4812,10 @@ function computeKHSXDongData(schedule, model){
     }
   });
 
+  // Nếu ở chế độ "keep_fifo" (Giữ lịch gốc · Trừ Thực tế FIFO & Dồn quá hạn về Hôm nay):
+  // Lấy lịch chuẩn gốc (getPlanRefSched) để biết số lượng kế hoạch ban đầu của từng ngày
+  const refSchedForFifo = (khsxRollMode === "keep_fifo") ? getPlanRefSched() : null;
+
   const rows = [];
   const dailyColTotals = {};
   dateLabels.forEach(d => { dailyColTotals[d] = 0; });
@@ -4727,45 +4837,110 @@ function computeKHSXDongData(schedule, model){
     dateLabels.forEach(d => { daily[d] = 0; });
     let partScheduledPcs = 0;
 
-    schedule.intervals.forEach(iv => {
-      if(iv.part === p.id && iv.seq === lastOps.get(p.id)){
-        const q = iv.lotQty || (iv.isBatch ? (iv.totalQty || remQ || 1) : 1);
-        const st = iv.start;
-        const et = iv.end;
-        const dur = Math.max(1, et - st);
-
-        const d_start = Math.floor(st / 1440);
-        const d_end = Math.floor(et / 1440);
-
-        if(d_start === d_end){
-          if(d_start < dateLabels.length){
-            const lbl = dateLabels[d_start];
-            daily[lbl] += q;
-          }
-        } else {
-          let assigned = 0;
-          for(let d = d_start; d <= d_end; d++){
-            if(d < dateLabels.length){
-              const day_st = d * 1440;
-              const day_et = (d + 1) * 1440;
-              const overlap = Math.max(0, Math.min(et, day_et) - Math.max(st, day_st));
-              if(overlap > 0){
-                const lbl = dateLabels[d];
-                let q_d = 0;
-                if(d === d_end){
-                  q_d = Math.max(0, q - assigned);
-                } else {
-                  q_d = Math.round(q * (overlap / dur));
-                  assigned += q_d;
+    if(khsxRollMode === "keep_fifo" && refSchedForFifo && refSchedForFifo.intervals){
+      // BƯỚC 1: Tính lịch phân bổ gốc từng ngày của Part (khi Thực tế = 0)
+      const origByDayIdx = new Array(dateLabels.length).fill(0);
+      if(p.daily && Object.keys(p.daily).length > 0){
+        // Nếu file Excel đã có sẵn số lượng chia theo ngày trong sheet KeHoachSanXuat thì ưu tiên lấy làm lịch gốc
+        dateLabels.forEach((lbl, dIdx) => {
+          origByDayIdx[dIdx] = Number(p.daily[lbl] || 0);
+        });
+      } else {
+        refSchedForFifo.intervals.forEach(iv => {
+          if(iv.part === p.id && iv.seq === lastOps.get(p.id)){
+            const q = iv.lotQty || (iv.isBatch ? (iv.totalQty || planQ || 1) : 1);
+            const st = iv.start, et = iv.end, dur = Math.max(1, et - st);
+            const d_start = Math.floor(st / 1440), d_end = Math.floor(et / 1440);
+            if(d_start === d_end){
+              if(d_start >= 0 && d_start < origByDayIdx.length) origByDayIdx[d_start] += q;
+            } else {
+              let assigned = 0;
+              for(let d = d_start; d <= d_end; d++){
+                if(d >= 0 && d < origByDayIdx.length){
+                  const overlap = Math.max(0, Math.min(et, (d + 1) * 1440) - Math.max(st, d * 1440));
+                  if(overlap > 0){
+                    const q_d = (d === d_end) ? Math.max(0, q - assigned) : Math.round(q * (overlap / dur));
+                    if(d !== d_end) assigned += q_d;
+                    origByDayIdx[d] += q_d;
+                  }
                 }
-                daily[lbl] += q_d;
               }
             }
           }
-        }
-        partScheduledPcs += q;
+        });
       }
-    });
+      // BƯỚC 2: Trừ số lượng Thực tế (actQ) từ những ngày đầu tiên (FIFO)
+      let remActToDeduct = actQ;
+      for(let d = 0; d < origByDayIdx.length; d++){
+        if(origByDayIdx[d] > 0 && remActToDeduct > 0){
+          const cut = Math.min(origByDayIdx[d], remActToDeduct);
+          origByDayIdx[d] -= cut;
+          remActToDeduct -= cut;
+        }
+      }
+      // BƯỚC 3: Mọi số lượng còn sót lại ở các ngày ĐÃ QUA (d < anchorDayIdx) được tự động dồn về ngày Hôm nay (anchorDayIdx)
+      const targetAnchor = Math.min(anchorDayIdx, origByDayIdx.length - 1);
+      if(targetAnchor > 0){
+        let overdueCarry = 0;
+        for(let d = 0; d < targetAnchor; d++){
+          overdueCarry += origByDayIdx[d];
+          origByDayIdx[d] = 0;
+        }
+        origByDayIdx[targetAnchor] += overdueCarry;
+      }
+      // Ghi vào daily và cộng tổng
+      for(let d = 0; d < dateLabels.length; d++){
+        if(origByDayIdx[d] > 0){
+          daily[dateLabels[d]] = origByDayIdx[d];
+          partScheduledPcs += origByDayIdx[d];
+        }
+      }
+    } else {
+      // Chế độ "auto_today", "day_k", hoặc "from_start": lấy trực tiếp từ schedule hiện tại
+      // Đồng thời bảo vệ 2 lớp: nếu có bất kỳ interval nào rơi vào d < anchorDayIdx (do lịch cũ chưa giải lại), tự động kẹp về anchorDayIdx
+      const safeAnchor = (khsxRollMode === "from_start") ? 0 : Math.min(anchorDayIdx, dateLabels.length - 1);
+      schedule.intervals.forEach(iv => {
+        if(iv.part === p.id && iv.seq === lastOps.get(p.id)){
+          const q = iv.lotQty || (iv.isBatch ? (iv.totalQty || remQ || 1) : 1);
+          const st = iv.start;
+          const et = iv.end;
+          const dur = Math.max(1, et - st);
+
+          const d_start = Math.floor(st / 1440);
+          const d_end = Math.floor(et / 1440);
+
+          if(d_start === d_end){
+            const effD = Math.max(safeAnchor, d_start);
+            if(effD < dateLabels.length){
+              const lbl = dateLabels[effD];
+              daily[lbl] += q;
+            }
+          } else {
+            let assigned = 0;
+            for(let d = d_start; d <= d_end; d++){
+              if(d < dateLabels.length){
+                const day_st = d * 1440;
+                const day_et = (d + 1) * 1440;
+                const overlap = Math.max(0, Math.min(et, day_et) - Math.max(st, day_st));
+                if(overlap > 0){
+                  const effD = Math.max(safeAnchor, d);
+                  const lbl = dateLabels[effD];
+                  let q_d = 0;
+                  if(d === d_end){
+                    q_d = Math.max(0, q - assigned);
+                  } else {
+                    q_d = Math.round(q * (overlap / dur));
+                    assigned += q_d;
+                  }
+                  daily[lbl] += q_d;
+                }
+              }
+            }
+          }
+          partScheduledPcs += q;
+        }
+      });
+    }
 
     dateLabels.forEach(d => { dailyColTotals[d] += daily[d]; });
     grandTotalPlan += planQ;
@@ -4797,7 +4972,9 @@ function computeKHSXDongData(schedule, model){
     grandTotalPlan,
     grandTotalActual,
     grandTotalRem,
-    grandTotalScheduled
+    grandTotalScheduled,
+    todayDayIdx,
+    anchorDayIdx
   };
 }
 
@@ -4812,6 +4989,62 @@ function sortKHSXDong(colKey){
   renderKHSXDong();
 }
 
+function ensureKhsxRollModeToolbar(dateLabels, todayDayIdx, anchorDayIdx){
+  let sel = document.getElementById("khsxRollModeSelect");
+  // Nếu trang HTML chưa có sẵn dropdown #khsxRollModeSelect, tự động chèn vào thanh công cụ KHSX_Dong
+  if(!sel){
+    const statusSel = document.getElementById("khsxStatusFilter");
+    if(statusSel && statusSel.parentNode){
+      const wrapSpan = document.createElement("span");
+      wrapSpan.style.cssText = "display:inline-flex;align-items:center;gap:4px;background:rgba(16,185,129,0.12);border:1px solid rgba(16,185,129,0.45);padding:2px 7px;border-radius:6px";
+      wrapSpan.title = "Chặn lỗi xếp lịch ngược vào ngày quá khứ khi cập nhật số lượng Thực tế giữa kỳ";
+      wrapSpan.innerHTML = `<b style="font-size:11px;color:#10b981;white-space:nowrap">📅 Mốc xếp lịch còn lại:</b>
+        <select id="khsxRollModeSelect" style="width:auto;min-width:165px;padding:3px 6px;font-size:11.5px;border-radius:4px;background:var(--panel);color:var(--fg);border:1px solid #10b981;font-weight:600;cursor:pointer"></select>`;
+      statusSel.parentNode.insertBefore(wrapSpan, statusSel.nextSibling);
+      sel = document.getElementById("khsxRollModeSelect");
+    }
+  }
+  if(!sel) return;
+
+  const todayLbl = (dateLabels && dateLabels[todayDayIdx]) ? dateLabels[todayDayIdx] : "Hôm nay";
+  const sig = (dateLabels || []).join(",") + "|" + todayDayIdx;
+  if(sel.dataset.optSig !== sig){
+    sel.dataset.optSig = sig;
+    let optsHtml = `
+      <option value="auto_today">🛡️ Từ Hôm nay (${todayLbl} · Khóa ngày đã qua)</option>
+      <option value="keep_fifo">📌 Giữ lịch gốc (Trừ Thực tế & Dồn về ${todayLbl})</option>
+      <option value="from_start">🗓️ Từ ngày đầu kỳ (${(dateLabels && dateLabels[0]) || "Ngày 1"})</option>
+    `;
+    if(dateLabels && dateLabels.length > 0){
+      optsHtml += `<optgroup label="─── Chọn ngày bắt đầu cụ thể ───">`;
+      dateLabels.forEach((lbl, idx) => {
+        const tag = (idx === todayDayIdx && idx > 0) ? " (Hôm nay)" : (idx < todayDayIdx ? " (Đã qua)" : "");
+        optsHtml += `<option value="day_${idx}">📅 Chỉ xếp từ ${lbl}${tag} trở đi</option>`;
+      });
+      optsHtml += `</optgroup>`;
+    }
+    sel.innerHTML = optsHtml;
+  }
+  if([...sel.options].some(o => o.value === khsxRollMode)){
+    sel.value = khsxRollMode;
+  } else {
+    sel.value = "auto_today";
+  }
+
+  if(!sel._boundRollChange){
+    sel._boundRollChange = true;
+    sel.addEventListener("change", e => {
+      khsxRollMode = e.target.value || "auto_today";
+      try { localStorage.setItem("xuong_spot_roll_mode", khsxRollMode); } catch(err){}
+      if(model){
+        runSolve();
+      } else {
+        renderKHSXDong();
+      }
+    });
+  }
+}
+
 function renderKHSXDong(){
   const wrap = document.getElementById("khsxDongTableWrap");
   if(!wrap) return;
@@ -4821,6 +5054,8 @@ function renderKHSXDong(){
   }
   const data = computeKHSXDongData(schedule, model);
   if(!data) return;
+
+  ensureKhsxRollModeToolbar(data.dateLabels, data.todayDayIdx || 0, data.anchorDayIdx || 0);
 
   // Lọc dữ liệu theo từ khoá tìm kiếm, mức ưu tiên & trạng thái
   let rows = data.rows.filter(r => {
@@ -4878,18 +5113,21 @@ function renderKHSXDong(){
     data.dateLabels.forEach(d => { sumDaily[d] += (r.daily[d] || 0); });
   });
 
+  const effAnchorIdx = (khsxRollMode === "from_start") ? 0 : (data.anchorDayIdx || 0);
+
   // Hàm render tiêu đề cột có hỗ trợ bấm sắp xếp (sortable header)
-  const renderTh = (colKey, title, minWidth, align="center", bg=null) => {
+  const renderTh = (colKey, title, minWidth, align="center", bg=null, extraSub="", titleTip="") => {
     const isSorted = (khsxSortCol === colKey);
     const arrow = isSorted ? (khsxSortAsc ? " ▲" : " ▼") : " <span style='opacity:0.35'>↕</span>";
     const headerBg = bg || (isSorted ? "#1D4ED8" : "#1E3A8A");
-    return `<th data-col="${colKey}" onclick="sortKHSXDong('${colKey}')" title="Bấm để sắp xếp theo ${title}" style="padding:6px 8px;border:1px solid #3b82f6;min-width:${minWidth};text-align:${align};background:${headerBg};cursor:pointer;user-select:none;transition:background 0.15s;position:sticky;top:0;z-index:4">
-      ${title}${arrow}
+    const tip = titleTip || `Bấm để sắp xếp theo ${title}`;
+    return `<th data-col="${colKey}" onclick="sortKHSXDong('${colKey}')" title="${tip}" style="padding:5px 7px;border:1px solid #3b82f6;min-width:${minWidth};text-align:${align};background:${headerBg};cursor:pointer;user-select:none;transition:background 0.15s;position:sticky;top:0;z-index:4">
+      <div>${title}${arrow}</div>${extraSub}
     </th>`;
   };
 
   let html = `<table class="khsxTable" style="width:100%;border-collapse:separate;border-spacing:0;font-size:11.5px;font-family:var(--font-sans);text-align:center">`;
-  html += `<thead><tr style="background:#1E3A8A;color:#ffffff;height:34px">`;
+  html += `<thead><tr style="background:#1E3A8A;color:#ffffff;height:36px">`;
   html += renderTh("stt", "STT", "35px");
   html += renderTh("part", "Part", "85px", "left");
   html += renderTh("planQty", "Kế hoạch", "70px", "right");
@@ -4898,8 +5136,22 @@ function renderKHSXDong(){
   html += renderTh("priority", "Ưu tiên", "55px");
   html += renderTh("startDate", "Bắt đầu", "70px");
   html += renderTh("dueDate", "Hạn giao", "70px");
-  data.dateLabels.forEach(d => {
-    html += renderTh(d, d, "68px", "center", (khsxSortCol === d ? "#1D4ED8" : "#1E40AF"));
+  data.dateLabels.forEach((d, dIdx) => {
+    const isPastCol = (effAnchorIdx > 0 && dIdx < effAnchorIdx);
+    const isAnchorCol = (effAnchorIdx > 0 && dIdx === effAnchorIdx);
+    let colBg = (khsxSortCol === d) ? "#1D4ED8" : "#1E40AF";
+    let subBadge = "";
+    let tip = `Ngày ${d} — Bấm để sắp xếp`;
+    if(isPastCol){
+      colBg = "#334155";
+      subBadge = `<div style="font-size:9px;color:#94a3b8;font-weight:500;margin-top:1px">🔒 Đã qua</div>`;
+      tip = `Ngày ${d} đã qua — Đã khóa để không xếp lịch lùi về quá khứ`;
+    } else if(isAnchorCol){
+      colBg = "#047857";
+      subBadge = `<div style="font-size:9px;color:#a7f3d0;font-weight:700;margin-top:1px">📍 Hôm nay</div>`;
+      tip = `Ngày ${d} (Mốc bắt đầu xếp sản lượng Còn lại)`;
+    }
+    html += renderTh(d, d, "68px", "center", colBg, subBadge, tip);
   });
   html += renderTh("totalScheduled", "Tổng Đạt", "75px", "right", (khsxSortCol === "totalScheduled" ? "#0E7490" : "#0F766E"));
   html += `</tr></thead><tbody>`;
@@ -4923,12 +5175,16 @@ function renderKHSXDong(){
     html += `<td style="padding:4px 6px;border:1px solid var(--line);color:#3b82f6;font-size:11px;${fzBg}">${r.startDate || '-'}</td>`;
     html += `<td style="padding:4px 6px;border:1px solid var(--line);color:${dueColor};font-weight:${r.isLate?'700':'400'};font-size:11px;${fzBg}">${r.dueDate || '-'}</td>`;
     
-    data.dateLabels.forEach(d => {
+    data.dateLabels.forEach((d, dIdx) => {
       const q = r.daily[d] || 0;
+      const isPastCol = (effAnchorIdx > 0 && dIdx < effAnchorIdx);
+      const isAnchorCol = (effAnchorIdx > 0 && dIdx === effAnchorIdx);
       if(q > 0){
-        html += `<td style="padding:4px 6px;border:1px solid var(--line);background:rgba(34,197,94,0.12);font-weight:bold;color:var(--good);font-family:var(--font-mono)">${q.toLocaleString()}</td>`;
+        const cellBg = isAnchorCol ? "rgba(16,185,129,0.20)" : "rgba(34,197,94,0.12)";
+        html += `<td style="padding:4px 6px;border:1px solid var(--line);background:${cellBg};font-weight:bold;color:var(--good);font-family:var(--font-mono)">${q.toLocaleString()}</td>`;
       } else {
-        html += `<td style="padding:4px 6px;border:1px solid var(--line);color:var(--line)">-</td>`;
+        const emptyBg = isPastCol ? "background:rgba(15,23,42,0.22);" : (isAnchorCol ? "background:rgba(16,185,129,0.04);" : "");
+        html += `<td style="padding:4px 6px;border:1px solid var(--line);${emptyBg}color:var(--line)">-</td>`;
       }
     });
 
@@ -5290,7 +5546,15 @@ function syncScrub(){
 function applySchedule(sched, solverName){
   schedule=sched;
   const effMk = Math.max(0, sched.makespan || planRefMakespan() || 0);
-  sim.t=Math.round(effMk*0.35); sim.playing=false;
+  let minIvStart = 0;
+  if(sched && sched.intervals && sched.intervals.length > 0){
+    minIvStart = Infinity;
+    for(let i = 0; i < sched.intervals.length; i++){
+      if(sched.intervals[i].start < minIvStart) minIvStart = sched.intervals[i].start;
+    }
+    if(!isFinite(minIvStart) || minIvStart < 0) minIvStart = 0;
+  }
+  sim.t = Math.round(minIvStart + Math.max(0, effMk - minIvStart) * 0.35); sim.playing=false;
   loadExec(); // nạp nhật ký thực tế đã lưu cho lịch này (nếu có)
   document.getElementById("playBtn").textContent="▶";
   document.getElementById("tEnd").textContent=Math.round(effMk);
@@ -5373,13 +5637,14 @@ function runSolve(extraOpts = {}){
   const breaks = getActiveBreaks();
   const elSubLot = document.getElementById("subLotSize");
   const sublotSize = elSubLot ? parseInt(elSubLot.value, 10) : 500;
+  const minStart = (extraOpts.minStartTime != null) ? extraOpts.minStartTime : getEffectiveMinStartTime(model);
   const opts = {
     objective: document.getElementById("objective").value,
     setup: +document.getElementById("setup").value || 0,
     sublotSize,
     breaks,
     downtimes,
-    minStartTime: extraOpts.minStartTime || 0,
+    minStartTime: minStart,
     frozenIntervals: extraOpts.frozenIntervals || []
   };
   const sched = solve(model, opts);
@@ -5427,13 +5692,14 @@ async function runSolveCpsat(extraOpts = {}){
       };
     });
 
+    const minStart = (extraOpts.minStartTime != null) ? extraOpts.minStartTime : getEffectiveMinStartTime(model);
     const payload = {
       model,
       time_limit: timeLimit,
       sublot_size: sublotSize,
       breaks,
       downtimes,
-      min_start_time: extraOpts.minStartTime || 0,
+      min_start_time: minStart,
       frozen_intervals: extraOpts.frozenIntervals || [],
       shift_length: shiftLen > 0 ? shiftLen : 540,
       machine_shifts: machineShifts
@@ -7359,7 +7625,8 @@ const tipGantt = document.getElementById("ganttTooltip");
 if(cvGantt && tipGantt){
   cvGantt.addEventListener("mousemove", ev => {
     if(!schedule || !model) return;
-    const { sched: gSched, makespan: effMakespan } = getEffectiveGanttSched();
+    const { sched: gSched, makespan: effMakespan, startMin = 0 } = getEffectiveGanttSched();
+    const spanMin = Math.max(60, effMakespan - startMin);
     const rect = cvGantt.getBoundingClientRect();
     const mx = ev.clientX - rect.left;
     const my = ev.clientY - rect.top;
@@ -7367,7 +7634,7 @@ if(cvGantt && tipGantt){
     const labW = 92, padT = 34, padB = 28;
     const h = rect.height;
     const rowH = Math.max(12, Math.min(28, (h - padT - padB) / N));
-    const scale = (rect.width - labW - 14) / Math.max(1, effMakespan);
+    const scale = (rect.width - labW - 14) / spanMin;
 
     if(mx < labW || my < padT || my > padT + N * rowH){
       tipGantt.style.display = "none";
@@ -7382,7 +7649,7 @@ if(cvGantt && tipGantt){
       return;
     }
 
-    const tMouse = (mx - labW) / scale;
+    const tMouse = startMin + (mx - labW) / scale;
     const mName = model.machines[mi];
     const mSh = getMachineShiftInfo(mi);
     const shiftCode = mSh.code || (mSh.label ? mSh.label.split(":")[0] : "HC");
