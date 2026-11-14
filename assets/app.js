@@ -1164,8 +1164,8 @@ function parseWorkbook(wb, preferredPlanSheet = null, preferredDsMode = null){
 /* ============================================================
    BỘ LẬP LỊCH HEURISTIC (FJSP + Ca nghỉ từng máy + Sự cố + Ưu tiên + Hạn giao)
    ============================================================ */
-function computeCalendarEnd(rawStart, duration, mi, breaks, dts){
-  const mBlocks = getMachineBlocks(mi, 60);
+function computeCalendarEnd(rawStart, duration, mi, breaks, dts, preBlocks){
+  const mBlocks = preBlocks || getMachineBlocks(mi, 60);
   let s = rawStart;
   let changed = true;
   let guard = 0;
@@ -1296,6 +1296,31 @@ function solve(model, opts){
   const wLoad = new Array(workers.length).fill(0);
   const wJobs = new Array(workers.length).fill(0);
 
+  // Tiền xử lý dữ liệu chuẩn hóa của Máy & Công nhân (1 lần duy nhất thay vì tính lại hàng triệu lần trong vòng lặp)
+  const allMachineBlocks = machines.map((_, mi) => getMachineBlocks(mi, 60));
+  const mNormArr = machines.map(m => strip(m || "").toLowerCase().replace(/[-_ ]/g, ""));
+  const mZoneNormArr = machines.map((_, mi) => strip((model.machineZones && model.machineZones[mi]) ? model.machineZones[mi] : "Xưởng Hàn Spot"));
+  const wMeta = workers.map((w, wIdx) => ({
+    w,
+    wIdx,
+    wz: strip(w.zone || ""),
+    prefNorms: (w.prefMachines || []).map(pm => strip(pm).toLowerCase().replace(/[-_ ]/g, "")),
+    shiftUpper: w.shift ? String(w.shift).toUpperCase() : "",
+    isHighSkill: String(w.skill || "").includes("3") || String(w.skill || "").includes("4"),
+    wEff: (w.eff && w.eff > 0) ? w.eff : 1.0
+  }));
+  const eligibleWByMachine = machines.map((_, mi) => {
+    if(wMeta.length === 0) return [];
+    const mz = mZoneNormArr[mi];
+    const mNorm = mNormArr[mi];
+    let elig = wMeta.filter(wm => !wm.wz || !mz || wm.wz.includes(mz) || mz.includes(wm.wz));
+    if(elig.length === 0) elig = wMeta;
+    return elig.map(wm => ({
+      ...wm,
+      isPref: wm.prefNorms.some(pNorm => pNorm === mNorm || mNorm.includes(pNorm) || pNorm.includes(mNorm))
+    }));
+  });
+
   // Áp dụng các việc đã đóng băng (nếu tái điều độ)
   frozenIntervals.forEach(f => {
     if(f.mi != null && f.mi < machines.length){
@@ -1337,56 +1362,34 @@ function solve(model, opts){
           const mSetupVal = (model.machineSetups && model.machineSetups[ch.mi] != null) ? model.machineSetups[ch.mi] : setup;
           const su = (mLast[ch.mi]!=null && mLast[ch.mi]!==j.part) ? mSetupVal : 0;
           const rawMStart = Math.max(jobReady, mFree[ch.mi], minStartTime, j.minStartTime || 0) + su;
-          const mName = machines[ch.mi] || "";
-          const mZone = (model.machineZones && model.machineZones[ch.mi]) ? model.machineZones[ch.mi] : "Xưởng Hàn Spot";
 
           // Tìm công nhân phù hợp nhất (DRC-FJSP)
           let candW = null, chosenWIdx = null, effOpTime = ch.time, rawStart = rawMStart;
-          if(workers.length > 0){
-            let eligibleW = [];
-            workers.forEach((w, wIdx) => {
-              const wz = strip(w.zone || "");
-              const mz = strip(mZone || "");
-              if(!wz || !mz || wz.includes(mz) || mz.includes(wz)){
-                eligibleW.push({ w, wIdx });
-              }
-            });
-            if(eligibleW.length === 0){
-              eligibleW = workers.map((w, wIdx) => ({ w, wIdx }));
-            }
-
+          const eligibleW = eligibleWByMachine[ch.mi];
+          if(eligibleW && eligibleW.length > 0){
             let bestWScore = Infinity;
             for(const ew of eligibleW){
-              const w = ew.w;
               const wIdx = ew.wIdx;
               const wAvail = wFree[wIdx];
               const wReady = Math.max(rawMStart, wAvail);
-              const isPref = w.prefMachines && w.prefMachines.some(pm => {
-                const pNorm = strip(pm).toLowerCase().replace(/[-_ ]/g, "");
-                const mNorm = strip(mName).toLowerCase().replace(/[-_ ]/g, "");
-                return pNorm === mNorm || mNorm.includes(pNorm) || pNorm.includes(mNorm);
-              });
-              const prefBonus = isPref ? -50000 : 0;
+              const prefBonus = ew.isPref ? -50000 : 0;
               const curDayM = (wReady % 1440);
               const activeShiftKey = (curDayM >= 720) ? "S7" : "S6";
-              const shiftMatch = w.shift && String(w.shift).toUpperCase().includes(activeShiftKey);
-              const shiftBonus = shiftMatch ? -30000 : 0;
+              const shiftBonus = ew.shiftUpper.includes(activeShiftKey) ? -30000 : 0;
               const waitPen = Math.max(0, wAvail - rawMStart) * 500;
-              const priMatch = (j.priority === 1 && (String(w.skill).includes("3") || String(w.skill).includes("4"))) ? -20000 : 0;
+              const priMatch = (j.priority === 1 && ew.isHighSkill) ? -20000 : 0;
               const score = wReady * 1000 + waitPen + prefBonus + priMatch + shiftBonus + wLoad[wIdx];
               if(score < bestWScore){
                 bestWScore = score;
-                candW = w;
+                candW = ew.w;
                 chosenWIdx = wIdx;
                 rawStart = wReady;
-                // Hiệu suất công nhân (Phase B: Skill matrix & Efficiency)
-                const wEff = (w.eff && w.eff > 0) ? w.eff : 1.0;
-                effOpTime = Math.max(1, Math.round(ch.time / wEff));
+                effOpTime = Math.max(1, Math.round(ch.time / ew.wEff));
               }
             }
           }
 
-          const timeSlot = computeCalendarEnd(rawStart, effOpTime, ch.mi, breaks, dts);
+          const timeSlot = computeCalendarEnd(rawStart, effOpTime, ch.mi, breaks, dts, allMachineBlocks[ch.mi]);
           const start = timeSlot.start;
           const end = timeSlot.end;
 
@@ -4067,17 +4070,33 @@ function roundRect(x,a,b,w,h,r){ r=Math.min(r,w/2,h/2); x.beginPath();
    ============================================================ */
 let ganttHoveredIv = null;
 
+function getEffectiveGanttSched(){
+  if(schedule && schedule.intervals && schedule.intervals.length > 0 && schedule.makespan > 0){
+    return { sched: schedule, isRefFallback: false, makespan: Math.max(60, schedule.makespan) };
+  }
+  const ref = getPlanRefSched();
+  if(ref && ref.intervals && ref.intervals.length > 0 && ref.makespan > 0){
+    return { sched: ref, isRefFallback: true, makespan: Math.max(60, ref.makespan) };
+  }
+  return { sched: schedule, isRefFallback: false, makespan: Math.max(540, (schedule && schedule.makespan) || 540) };
+}
+
 function renderGantt(){
-  const cv=document.getElementById("gantt"); const p=cv.parentElement;
-  const dpr=Math.min(2,devicePixelRatio); const w=p.clientWidth,h=p.clientHeight;
-  if(w<2||h<2||!schedule)return; cv.width=w*dpr;cv.height=h*dpr; const x=cv.getContext("2d"); x.scale(dpr,dpr);
+  const cv=document.getElementById("gantt"); if(!cv) return;
+  const p=cv.parentElement;
+  const dpr=Math.min(2,devicePixelRatio||1); const w=p.clientWidth,h=p.clientHeight;
+  if(w<2||h<2||!schedule||!model||!model.machines)return;
+  const targetW = Math.round(w*dpr), targetH = Math.round(h*dpr);
+  if(cv.width !== targetW || cv.height !== targetH){ cv.width=targetW; cv.height=targetH; }
+  const x=cv.getContext("2d"); x.setTransform(dpr,0,0,dpr,0,0);
   x.clearRect(0,0,w,h);
 
-  const fg=cssVar("--fg"),muted=cssVar("--muted"),line=cssVar("--line"),hot=cssVar("--hot");
-  const labW=92, padT=34, padB=28, N=model.machines.length;
+  const { sched: gSched, isRefFallback, makespan: effMakespan } = getEffectiveGanttSched();
+  const fg=cssVar("--fg"),muted=cssVar("--muted"),line=cssVar("--line"),hot=cssVar("--hot"),good=cssVar("--good");
+  const labW=92, padT=34, padB=28, N=Math.max(1, model.machines.length);
   const rowH=Math.max(12,Math.min(28,(h-padT-padB)/N));
-  const scale=(w-labW-14)/Math.max(1,schedule.makespan);
-  const numDays = Math.ceil(schedule.makespan / 1440) || 1;
+  const scale=(w-labW-14)/Math.max(1,effMakespan);
+  const numDays = Math.min(365, Math.max(1, Math.ceil(effMakespan / 1440) || 1));
 
   // 1. Nền hàng máy xen kẽ (Zebra rows) để dễ theo dõi từng máy
   for(let i=0; i<N; i++){
@@ -4090,19 +4109,20 @@ function renderGantt(){
   }
 
   // 2. Vùng nghỉ ca & Vùng hết ca theo từng máy
+  const mShifts = model.machines.map((_, i) => getMachineShiftInfo(i));
   for(let d=0; d<numDays; d++){
     const dayOffset = d * 1440;
     for(let i=0; i<N; i++){
-      const mSh = getMachineShiftInfo(i);
+      const mSh = mShifts[i];
       const gy = padT + i * rowH;
 
       if(mSh.breaks){
         mSh.breaks.forEach(b => {
           const bs = dayOffset + b.start;
           const be = dayOffset + b.end;
-          if(bs < schedule.makespan){
+          if(bs < effMakespan){
             const bx = labW + bs * scale;
-            const bw = Math.max(2, (Math.min(be, schedule.makespan) - bs) * scale);
+            const bw = Math.max(2, (Math.min(be, effMakespan) - bs) * scale);
             x.fillStyle = "rgba(100, 116, 139, 0.22)";
             x.fillRect(bx, gy, bw, rowH);
           }
@@ -4112,9 +4132,9 @@ function renderGantt(){
       if(mSh.shiftLength < 1440){
         const nightS = dayOffset + mSh.shiftLength;
         const nightE = dayOffset + 1440;
-        if(nightS < schedule.makespan){
+        if(nightS < effMakespan){
           const nx = labW + nightS * scale;
-          const nw = Math.max(2, (Math.min(nightE, schedule.makespan) - nightS) * scale);
+          const nw = Math.max(2, (Math.min(nightE, effMakespan) - nightS) * scale);
           x.fillStyle = "rgba(15, 23, 42, 0.42)";
           x.fillRect(nx, gy, nw, rowH);
         }
@@ -4160,7 +4180,7 @@ function renderGantt(){
   for(let i=0; i<N; i++){
     const gy = padT + i * rowH;
     const mName = model.machines[i];
-    const mSh = getMachineShiftInfo(i);
+    const mSh = mShifts[i];
     const shiftCode = mSh.code || (mSh.label ? mSh.label.split(":")[0] : "HC");
 
     x.textAlign = "left";
@@ -4171,17 +4191,18 @@ function renderGantt(){
 
     x.textAlign = "right";
     x.font = "600 8.5px 'IBM Plex Sans',sans-serif";
-    x.fillStyle = shiftCode.includes("24") ? "var(--good)" : "var(--muted)";
+    x.fillStyle = shiftCode.includes("24") ? good : muted;
     x.fillText(shiftCode, labW - 6, gy + rowH / 2);
   }
 
-  // 5. Thước đo thời gian dưới chân Gantt
+  // 5. Thước đo thời gian dưới chân Gantt (Bảo vệ step >= 1 để KHÔNG BAO GIỜ lặp vô hạn khi makespan = 0)
   x.strokeStyle = line;
   x.fillStyle = muted;
   x.textAlign = "center";
   x.textBaseline = "top";
-  const step = niceStep(schedule.makespan);
-  for(let tt=0; tt<=schedule.makespan+0.5; tt+=step){
+  const step = Math.max(1, niceStep(effMakespan));
+  let tickGuard = 0;
+  for(let tt=0; tt<=effMakespan+0.5 && tickGuard++ < 200; tt+=step){
     const gx = labW + tt * scale;
     x.globalAlpha = 0.35;
     x.beginPath(); x.moveTo(gx, padT); x.lineTo(gx, padT + N * rowH); x.stroke();
@@ -4194,10 +4215,10 @@ function renderGantt(){
 
   // 6. Vùng sự cố máy (Downtimes)
   downtimes.forEach(dt => {
-    if(dt.mi < N && dt.start < schedule.makespan){
+    if(dt.mi < N && dt.start < effMakespan){
       const gy = padT + dt.mi * rowH;
       const bx = labW + dt.start * scale;
-      const bw = Math.max(3, (Math.min(dt.end, schedule.makespan) - dt.start) * scale);
+      const bw = Math.max(3, (Math.min(dt.end, effMakespan) - dt.start) * scale);
       x.fillStyle = "rgba(232, 97, 31, 0.4)";
       roundRect(x, bx, gy+2, bw, rowH-4, 3);
       x.fill();
@@ -4215,9 +4236,10 @@ function renderGantt(){
   });
 
   // 7. Vẽ các khối công việc hàn (Task Blocks) - Cắt tỉa (clip) chữ gọn gàng
+  const perMach = (gSched && gSched.perMachine) ? gSched.perMachine : [];
   for(let i=0; i<N; i++){
     const gy = padT + i * rowH;
-    schedule.perMachine[i].forEach(iv => {
+    (perMach[i] || []).forEach(iv => {
       const bx = labW + iv.start * scale;
       const bw = Math.max(3, (iv.end - iv.start) * scale);
       const isHovered = (ganttHoveredIv === iv);
@@ -4259,7 +4281,7 @@ function renderGantt(){
 
   // 8. Cờ hạn giao (Due Date Markers)
   model.parts.forEach(p => {
-    if(p.dueDate && p.dueDate <= schedule.makespan){
+    if(p.dueDate && p.dueDate <= effMakespan){
       const dx = labW + p.dueDate * scale;
       x.save();
       x.strokeStyle = "rgba(239, 68, 68, 0.85)";
@@ -4278,14 +4300,36 @@ function renderGantt(){
   });
 
   // 9. Vạch thời gian mô phỏng hiện tại
-  const cx = labW + sim.t * scale;
+  const cx = labW + Math.min(effMakespan, Math.max(0, sim.t)) * scale;
   x.strokeStyle = hot;
   x.lineWidth = 2;
   x.beginPath(); x.moveTo(cx, padT - 4); x.lineTo(cx, padT + N * rowH + 2); x.stroke();
   x.lineWidth = 1;
+
+  // 10. Nhãn thông báo khi 100% kế hoạch đã hoàn thành (Thực tế >= Kế hoạch)
+  if(isRefFallback){
+    x.save();
+    const badgeTxt = "✓ Đã hoàn thành 100% Kế hoạch — Hiển thị Lịch chuẩn để đối chiếu";
+    x.font = "bold 10.5px 'IBM Plex Sans',sans-serif";
+    const tw = x.measureText(badgeTxt).width + 18;
+    const bx = Math.max(labW + 8, w - tw - 10), by = 4, bh = 22;
+    x.fillStyle = "rgba(5, 150, 105, 0.92)";
+    roundRect(x, bx, by, tw, bh, 5);
+    x.fill();
+    x.fillStyle = "#ffffff";
+    x.textAlign = "left";
+    x.textBaseline = "middle";
+    x.fillText(badgeTxt, bx + 9, by + bh / 2);
+    x.restore();
+  }
 }
-function niceStep(span){ const raw=span/8; const p=Math.pow(10,Math.floor(Math.log10(raw)));
-  const n=raw/p; return (n<1.5?1:n<3.5?2:n<7.5?5:10)*p; }
+function niceStep(span){
+  const safeSpan = Math.max(60, Number(span) || 60);
+  const raw = safeSpan / 8;
+  const p = Math.pow(10, Math.floor(Math.log10(raw)));
+  const n = raw / p;
+  return Math.max(1, (n < 1.5 ? 1 : n < 3.5 ? 2 : n < 7.5 ? 5 : 10) * p);
+}
 
 /* ============================================================
    CỘT 3: SẢN LƯỢNG THỜI GIAN THỰC & BIỂU ĐỒ TIẾN ĐỘ THEO NGÀY
@@ -4318,7 +4362,7 @@ function totalActualPcs(){ return model.parts.reduce((s, p) => s + (p.actualQty 
 
 /* ===== Đường cong KẾ HOẠCH chuẩn (lập lịch TOÀN BỘ kế hoạch, KHÔNG phụ thuộc Thực tế) =====
    Dùng cho "Kế hoạch đến thời điểm t": chỉ đổi theo con trỏ thời gian t, KHÔNG đổi khi sửa Thực tế. */
-let _planRefSched = null, _planRefSig = "";
+let _planRefSched = null, _planRefSig = "", _outChartCacheKey = "", _outChartCachePts = null;
 function _planSignature(){
   // Chữ ký CHỈ gồm kế hoạch + routing + tham số lịch (KHÔNG gồm actualQty) → sửa Thực tế không làm tính lại
   const ps = (model.parts || []).map(p => [p.id, (p.planQty != null ? p.planQty : (p.qty || 0)), p.pack || 0, p.eff || 1, p.minStartTime || 0, p.priority || 2, p.ordered ? 1 : 0, (p.ops || []).length].join(",")).join("|");
@@ -4343,7 +4387,18 @@ function getPlanRefSched(){
     setup: +((document.getElementById("setup") || {}).value) || 0,
     sublotSize, breaks, downtimes, minStartTime: 0, frozenIntervals: []
   };
-  try { _planRefSched = solve(planModel, opts); _planRefSig = sig; }
+  try {
+    _planRefSched = solve(planModel, opts);
+    if(_planRefSched && _planRefSched.intervals){
+      const lastOps = new Map();
+      (model.parts || []).forEach(p => {
+        if(p.ops && p.ops.length) lastOps.set(p.id, Math.max.apply(null, p.ops.map(o => o.seq)));
+      });
+      _planRefSched._lastOpIvs = _planRefSched.intervals.filter(iv => iv.seq === lastOps.get(iv.part));
+    }
+    _planRefSig = sig;
+    _outChartCacheKey = "";
+  }
   catch(e){ _planRefSched = null; console.warn("plan-ref solve failed", e); }
   return _planRefSched;
 }
@@ -4351,16 +4406,22 @@ function planRefMakespan(){ const s = getPlanRefSched(); return (s && s.makespan
 // Sản lượng tích luỹ (theo công đoạn cuối) tới thời điểm tm, trên một lịch cho trước
 function cumAtSched(sched, tm){
   if(!sched || !sched.intervals) return 0;
-  const lastOps = new Map();
-  (model.parts || []).forEach(p => lastOps.set(p.id, Math.max.apply(null, p.ops.map(o => o.seq))));
+  let finalIvs = sched._lastOpIvs;
+  if(!finalIvs){
+    const lastOps = new Map();
+    (model.parts || []).forEach(p => {
+      if(p.ops && p.ops.length) lastOps.set(p.id, Math.max.apply(null, p.ops.map(o => o.seq)));
+    });
+    finalIvs = sched.intervals.filter(iv => iv.seq === lastOps.get(iv.part));
+    sched._lastOpIvs = finalIvs;
+  }
   let pcs = 0;
-  sched.intervals.forEach(iv => {
-    if(iv.seq === lastOps.get(iv.part)){
-      const q = (iv.lotQty != null) ? iv.lotQty : (iv.isBatch ? (iv.totalQty || 1) : 1);
-      if(tm >= iv.end) pcs += q;
-      else if(tm > iv.start) pcs += Math.round(q * (tm - iv.start) / Math.max(1, iv.end - iv.start));
-    }
-  });
+  for(let i = 0; i < finalIvs.length; i++){
+    const iv = finalIvs[i];
+    const q = (iv.lotQty != null) ? iv.lotQty : (iv.isBatch ? (iv.totalQty || 1) : 1);
+    if(tm >= iv.end) pcs += q;
+    else if(tm > iv.start) pcs += Math.round(q * (tm - iv.start) / Math.max(1, iv.end - iv.start));
+  }
   return pcs;
 }
 // "Kế hoạch đến thời điểm t" = sản lượng kế hoạch tích luỹ tới t (CỐ ĐỊNH, không đổi khi sửa Thực tế)
@@ -4370,8 +4431,8 @@ function renderStats(){
   if(!schedule)return;
   const t=sim.t;
   
-  // Hiển thị Makespan
-  const mk = Math.round(schedule.makespan);
+  // Hiển thị Makespan (nếu 100% part đã xong khiến makespan còn lại = 0, hiển thị kèm makespan kế hoạch gốc)
+  const mk = Math.round(schedule.makespan > 0 ? schedule.makespan : planRefMakespan());
   if(mk >= 1440){
     const d = Math.floor(mk / 1440);
     const remM = mk % 1440;
@@ -4425,7 +4486,8 @@ function renderStats(){
   // hiệu suất TB tới thời điểm t
   let util=0; if(t>0){ let s=0; for(let i=0;i<model.machines.length;i++) s+=busyUntil(i,t)/t; util=s/model.machines.length; }
   document.getElementById("kUtil").textContent=Math.round(util*100)+"%";
-  document.getElementById("prog").style.width=(100*Math.min(1,t/schedule.makespan))+"%";
+  const effEnd = Math.max(1, schedule.makespan || planRefMakespan() || 1);
+  document.getElementById("prog").style.width=(100*Math.min(1,t/effEnd))+"%";
   renderOutChart();
   renderMachList();
 }
@@ -4433,14 +4495,17 @@ function renderStats(){
 function renderOutChart(){
   const cv=document.getElementById("outchart"); if(!cv) return;
   const w=cv.clientWidth||cv.parentElement.clientWidth-28;
-  const dpr=Math.min(2,devicePixelRatio); const h=150; cv.width=w*dpr; cv.height=h*dpr; cv.style.height=h+"px";
-  const x=cv.getContext("2d"); x.scale(dpr,dpr); x.clearRect(0,0,w,h);
+  if(w < 10) return;
+  const dpr=Math.min(2,devicePixelRatio||1); const h=150;
+  const targetW = Math.round(w*dpr), targetH = Math.round(h*dpr);
+  if(cv.width !== targetW || cv.height !== targetH){ cv.width=targetW; cv.height=targetH; cv.style.height=h+"px"; }
+  const x=cv.getContext("2d"); x.setTransform(dpr,0,0,dpr,0,0); x.clearRect(0,0,w,h);
   const line=cssVar("--line"), muted=cssVar("--muted"), accent=cssVar("--accent"), hot=cssVar("--hot");
 
   const totalPcsGoal = totalPlanPcs();  // trục Y = TỔNG kế hoạch (đường cong = kế hoạch tích luỹ theo thời gian)
-  const span = Math.max(1, schedule.makespan, planRefMakespan());  // trục X phủ hết thời gian của TOÀN BỘ kế hoạch
+  const span = Math.max(60, schedule.makespan || 0, planRefMakespan() || 0);  // trục X phủ hết thời gian của TOÀN BỘ kế hoạch
   const padL = 42, padR = 14, padT = 12, padB = 22;
-  const plotW = w - padL - padR;
+  const plotW = Math.max(10, w - padL - padR);
   const plotH = h - padT - padB;
   const sx = t => padL + plotW * (Math.min(span, Math.max(0, t)) / span);
   const sy = pcs => (padT + plotH) - plotH * (Math.min(totalPcsGoal, Math.max(0, pcs)) / Math.max(1, totalPcsGoal));
@@ -4459,7 +4524,7 @@ function renderOutChart(){
   });
 
   // 2. Đường lưới dọc theo Ngày (X-axis date ticks)
-  const numDays = Math.ceil(span / 1440);
+  const numDays = Math.min(365, Math.ceil(span / 1440));
   const dateLabels = (model && model.dateLabels && model.dateLabels.length > 0) ? model.dateLabels : [];
   const daySkip = numDays > 10 ? 2 : 1;
 
@@ -4477,13 +4542,20 @@ function renderOutChart(){
     }
   }
 
-  // 3. Đường cong sản lượng tích luỹ theo thời gian
-  const numSamples = Math.min(150, Math.max(40, Math.round(w / 4)));
-  const pts = [];
-  for(let i = 0; i <= numSamples; i++){
-    const curT = (i / numSamples) * span;
-    const curPcs = plannedCumAt(curT);
-    pts.push({ t: curT, pcs: curPcs, x: sx(curT), y: sy(curPcs) });
+  // 3. Đường cong sản lượng tích luỹ theo thời gian (được cache theo chữ ký kế hoạch & kích thước canvas)
+  const numSamples = Math.min(120, Math.max(40, Math.round(w / 4)));
+  const refSched = getPlanRefSched();
+  const cacheKey = `${_planRefSig}|${numSamples}|${span}|${totalPcsGoal}|${w}`;
+  let pts = _outChartCachePts;
+  if(_outChartCacheKey !== cacheKey || !pts){
+    pts = [];
+    for(let i = 0; i <= numSamples; i++){
+      const curT = (i / numSamples) * span;
+      const curPcs = Math.min(totalPcsGoal, cumAtSched(refSched, curT));
+      pts.push({ t: curT, pcs: curPcs, x: sx(curT), y: sy(curPcs) });
+    }
+    _outChartCacheKey = cacheKey;
+    _outChartCachePts = pts;
   }
 
   // Tô dải diện tích dưới đường cong
@@ -4509,7 +4581,7 @@ function renderOutChart(){
 
   // 4. Vạch con trỏ thời gian hiện tại
   const curPlayT = chartHoverT != null ? chartHoverT : sim.t;
-  const curPlayPcs = plannedCumAt(curPlayT);
+  const curPlayPcs = Math.min(totalPcsGoal, cumAtSched(refSched, curPlayT));
   const px = sx(curPlayT);
   const py = sy(curPlayPcs);
 
@@ -4525,14 +4597,17 @@ function renderOutChart(){
     cv.addEventListener("mousemove", ev => {
       const rect = cv.getBoundingClientRect();
       const mouseX = ev.clientX - rect.left;
-      const ratio = Math.max(0, Math.min(1, (mouseX - padL) / plotW));
-      chartHoverT = ratio * Math.max(1, schedule.makespan, planRefMakespan());
+      const curPlotW = Math.max(10, rect.width - padL - padR);
+      const ratio = Math.max(0, Math.min(1, (mouseX - padL) / curPlotW));
+      const curSpan = Math.max(60, schedule ? schedule.makespan : 0, planRefMakespan());
+      chartHoverT = ratio * curSpan;
+      const curGoal = totalPlanPcs();
       const pcsH = plannedCumAt(chartHoverT);
-      const pctH = Math.round((pcsH / Math.max(1, totalPcsGoal)) * 100);
+      const pctH = Math.round((pcsH / Math.max(1, curGoal)) * 100);
       const elT = document.getElementById("chartTime");
       const elP = document.getElementById("chartPcs");
       if(elT) elT.textContent = `${formatCalendarTime(chartHoverT)} (${Math.round(chartHoverT)}p)`;
-      if(elP) elP.textContent = `${pcsH.toLocaleString()} / ${totalPcsGoal.toLocaleString()} pcs (${pctH}%)`;
+      if(elP) elP.textContent = `${pcsH.toLocaleString()} / ${curGoal.toLocaleString()} pcs (${pctH}%)`;
       renderOutChart();
     });
     cv.addEventListener("mouseleave", () => {
@@ -5166,21 +5241,22 @@ function renderMachList(){
 /* ============================================================
    VÒNG LẶP MÔ PHỎNG
    ============================================================ */
-let activeTab="three", lastTs=0, _lastGanttT=-1, _lastGanttMs=0;
+let activeTab="three", lastTs=0, _lastGanttT=-1, _lastGanttMs=0, _lastStatsT=-1, _statsDirty=true;
 function loop(ts){
   const dt=(ts-lastTs)/1000||0; lastTs=ts;
   if(schedule){
+    const effMk = Math.max(1, schedule.makespan || planRefMakespan() || 540);
     if(sim.liveMode){
       // Bám sát đồng hồ thật: t = thời điểm hiện tại trên timeline (theo Giờ gốc t=0)
-      sim.t = Math.max(0, Math.min(schedule.makespan, nowTimelineMin()));
+      sim.t = Math.max(0, Math.min(effMk, nowTimelineMin()));
       syncScrub();
     } else if(sim.playing){
       if(sim.realRatio>0){
         sim.t += dt*(sim.realRatio/60); // playback tỉ lệ thực: 60× = 1 phút/giây
-        if(sim.t>=schedule.makespan){ sim.t=schedule.makespan; sim.playing=false; document.getElementById("playBtn").textContent="▶"; }
+        if(sim.t>=effMk){ sim.t=effMk; sim.playing=false; document.getElementById("playBtn").textContent="▶"; }
       } else {
-        sim.t += dt*sim.speed*(schedule.makespan/18); // demo ~18s/vòng ở 1x
-        if(sim.t>=schedule.makespan){ sim.t=0; } // lặp
+        sim.t += dt*sim.speed*(effMk/18); // demo ~18s/vòng ở 1x
+        if(sim.t>=effMk){ sim.t=0; } // lặp
       }
       syncScrub();
     }
@@ -5188,34 +5264,44 @@ function loop(ts){
   // render view đang mở
   if(activeTab==="three"&&THREE_OK){ renderThree(); adaptGfx(dt); }
   else if(activeTab==="gantt"){
-    // CHỈ vẽ lại Gantt khi mốc thời gian đổi (đang chạy/live) hoặc làm mới định kỳ,
-    // tối đa ~12 khung/giây. Tránh vẽ lại toàn bộ canvas mỗi frame -> gây ĐƠ khi nhiều part.
-    if(ts - _lastGanttMs >= 80 && (sim.t !== _lastGanttT || ts - _lastGanttMs >= 700)){
+    // CHỈ vẽ lại Gantt khi mốc thời gian đổi (đang chạy/live) hoặc mới chuyển tab
+    if(ts - _lastGanttMs >= 80 && (sim.t !== _lastGanttT || _lastGanttMs === 0)){
       renderGantt(); _lastGanttT = sim.t; _lastGanttMs = ts;
     }
   }
-  renderStats();
+  if(_statsDirty || Math.abs(sim.t - _lastStatsT) > 0.01){
+    renderStats();
+    _lastStatsT = sim.t;
+    _statsDirty = false;
+  }
   document.getElementById("tNow").textContent=Math.round(sim.t);
   const elClock = document.getElementById("tClock");
   if(elClock) elClock.textContent = (sim.liveMode ? "🔴 LIVE " : "") + formatProgressClock(sim.t, sim.liveMode);
   requestAnimationFrame(loop);
 }
-function syncScrub(){ document.getElementById("scrub").value=Math.round(1000*sim.t/Math.max(1,schedule.makespan)); }
+function syncScrub(){
+  const effMk = schedule ? Math.max(1, schedule.makespan || planRefMakespan() || 540) : 1;
+  document.getElementById("scrub").value=Math.round(1000*sim.t/effMk);
+}
 
 /* ============================================================
    WIRING & SOLVING
    ============================================================ */
 function applySchedule(sched, solverName){
   schedule=sched;
-  sim.t=Math.round(schedule.makespan*0.35); sim.playing=false;
+  const effMk = Math.max(0, sched.makespan || planRefMakespan() || 0);
+  sim.t=Math.round(effMk*0.35); sim.playing=false;
   loadExec(); // nạp nhật ký thực tế đã lưu cho lịch này (nếu có)
   document.getElementById("playBtn").textContent="▶";
-  document.getElementById("tEnd").textContent=Math.round(schedule.makespan);
+  document.getElementById("tEnd").textContent=Math.round(effMk);
   document.getElementById("scrub").max=1000; syncScrub();
   if(threeReady) buildMachines();
   document.getElementById("machList").innerHTML="";
+  _statsDirty = true;
+  _lastGanttMs = 0;
   renderStats();
   renderKHSXDong();
+  if(activeTab === "gantt") renderGantt();
   if(activeTab === "wip") renderWipPlan();
   if(activeTab === "workers") renderWorkersPlan();
   const st=document.getElementById("solverStatus");
@@ -7273,25 +7359,26 @@ const tipGantt = document.getElementById("ganttTooltip");
 if(cvGantt && tipGantt){
   cvGantt.addEventListener("mousemove", ev => {
     if(!schedule || !model) return;
+    const { sched: gSched, makespan: effMakespan } = getEffectiveGanttSched();
     const rect = cvGantt.getBoundingClientRect();
     const mx = ev.clientX - rect.left;
     const my = ev.clientY - rect.top;
-    const N = model.machines.length;
+    const N = Math.max(1, model.machines.length);
     const labW = 92, padT = 34, padB = 28;
     const h = rect.height;
     const rowH = Math.max(12, Math.min(28, (h - padT - padB) / N));
-    const scale = (rect.width - labW - 14) / Math.max(1, schedule.makespan);
+    const scale = (rect.width - labW - 14) / Math.max(1, effMakespan);
 
     if(mx < labW || my < padT || my > padT + N * rowH){
       tipGantt.style.display = "none";
-      if(ganttHoveredIv !== null){ ganttHoveredIv = null; }
+      if(ganttHoveredIv !== null){ ganttHoveredIv = null; _lastGanttMs = 0; }
       return;
     }
 
     const mi = Math.floor((my - padT) / rowH);
     if(mi < 0 || mi >= N){
       tipGantt.style.display = "none";
-      if(ganttHoveredIv !== null){ ganttHoveredIv = null; }
+      if(ganttHoveredIv !== null){ ganttHoveredIv = null; _lastGanttMs = 0; }
       return;
     }
 
@@ -7301,9 +7388,10 @@ if(cvGantt && tipGantt){
     const shiftCode = mSh.code || (mSh.label ? mSh.label.split(":")[0] : "HC");
 
     // 1. Tìm xem chuột trúng khối việc nào
-    const iv = (schedule.perMachine[mi] || []).find(it => tMouse >= it.start && tMouse <= it.end);
+    const perMach = (gSched && gSched.perMachine) ? gSched.perMachine : [];
+    const iv = (perMach[mi] || []).find(it => tMouse >= it.start && tMouse <= it.end);
     if(iv){
-      ganttHoveredIv = iv;
+      if(ganttHoveredIv !== iv){ ganttHoveredIv = iv; _lastGanttMs = 0; }
       const durationM = Math.round(iv.end - iv.start);
       const durationS = Math.round((iv.end - iv.start) * 60);
       const partObj = (model && model.parts) ? model.parts.find(x => x.id === iv.part) : null;
@@ -7345,7 +7433,7 @@ if(cvGantt && tipGantt){
     // 2. Kiểm tra xem chuột có trúng sự cố máy (Downtimes) không
     const dt = downtimes.find(d => d.mi === mi && tMouse >= d.start && tMouse <= d.end);
     if(dt){
-      ganttHoveredIv = null;
+      if(ganttHoveredIv !== null){ ganttHoveredIv = null; _lastGanttMs = 0; }
       tipGantt.innerHTML = `
         <div style="font-weight:700;font-size:12px;color:#f87171">⚠ Sự cố / Bảo trì máy</div>
         <div style="margin-top:3px;color:#cbd5e1">📍 Máy: <b style="color:#fff">${mName}</b></div>
@@ -7359,12 +7447,12 @@ if(cvGantt && tipGantt){
     }
 
     tipGantt.style.display = "none";
-    if(ganttHoveredIv !== null){ ganttHoveredIv = null; }
+    if(ganttHoveredIv !== null){ ganttHoveredIv = null; _lastGanttMs = 0; }
   });
 
   cvGantt.addEventListener("mouseleave", () => {
     tipGantt.style.display = "none";
-    ganttHoveredIv = null;
+    if(ganttHoveredIv !== null){ ganttHoveredIv = null; _lastGanttMs = 0; }
   });
 }
 
