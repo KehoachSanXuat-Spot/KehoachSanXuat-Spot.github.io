@@ -5124,7 +5124,7 @@ function renderMachList(){
 /* ============================================================
    VÒNG LẶP MÔ PHỎNG
    ============================================================ */
-let activeTab="three", lastTs=0;
+let activeTab="three", lastTs=0, _lastGanttT=-1, _lastGanttMs=0;
 function loop(ts){
   const dt=(ts-lastTs)/1000||0; lastTs=ts;
   if(schedule){
@@ -5145,7 +5145,13 @@ function loop(ts){
   }
   // render view đang mở
   if(activeTab==="three"&&THREE_OK){ renderThree(); adaptGfx(dt); }
-  else if(activeTab==="gantt") renderGantt();
+  else if(activeTab==="gantt"){
+    // CHỈ vẽ lại Gantt khi mốc thời gian đổi (đang chạy/live) hoặc làm mới định kỳ,
+    // tối đa ~12 khung/giây. Tránh vẽ lại toàn bộ canvas mỗi frame -> gây ĐƠ khi nhiều part.
+    if(ts - _lastGanttMs >= 80 && (sim.t !== _lastGanttT || ts - _lastGanttMs >= 700)){
+      renderGantt(); _lastGanttT = sim.t; _lastGanttMs = ts;
+    }
+  }
   renderStats();
   document.getElementById("tNow").textContent=Math.round(sim.t);
   const elClock = document.getElementById("tClock");
@@ -6209,6 +6215,7 @@ function setTab(name){
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.pane===name));
   document.querySelectorAll(".pane").forEach(p=>p.hidden = p.id!=="pane-"+name);
   if(name==="three") resizeThree();
+  if(name==="gantt"){ renderGantt(); _lastGanttT = sim.t; _lastGanttMs = performance.now(); }
   if(name==="khsxDong") renderKHSXDong();
   if(name==="wip") renderWipPlan();
   if(name==="workers") renderWorkersPlan();
