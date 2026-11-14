@@ -387,6 +387,31 @@ function formatExcelDateValue(rawVal){
   return s;
 }
 
+// ===== Cầu nối giữa định dạng hiển thị "DD-MMM" và input lịch "yyyy-mm-dd" =====
+const _MONTHS_EN = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+// "09-Nov" (hoặc serial/ISO) -> "2026-11-09" để gán cho <input type="date">.
+// Năm = năm hiện tại, khớp cách app neo timeline (new Date().getFullYear()).
+function khsxDateToISO(disp){
+  const s = formatExcelDateValue(disp || "");     // chuẩn hoá về DD-MMM
+  const m = s.match(/^(\d{1,2})-([A-Za-z]{3})/);
+  if(!m) return "";
+  const day = parseInt(m[1], 10);
+  const mon = m[2].charAt(0).toUpperCase() + m[2].slice(1).toLowerCase();
+  const mi = _MONTHS_EN.indexOf(mon);
+  if(mi < 0 || !(day >= 1 && day <= 31)) return "";
+  const yr = new Date().getFullYear();
+  return `${yr}-${String(mi+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+}
+// "2026-11-20" -> "20-Nov" (bỏ năm, giữ đúng định dạng dữ liệu đang dùng)
+function isoToKhsxDate(iso){
+  const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(!m) return "";
+  const day = parseInt(m[3], 10);
+  const mi = parseInt(m[2], 10) - 1;
+  if(mi < 0 || mi > 11) return "";
+  return `${String(day).padStart(2,'0')}-${_MONTHS_EN[mi]}`;
+}
+
 // Chuyển đổi nhãn ngày (09-Nov, 15-Nov, N3 17:00, 48h...) thành phút mốc thời gian trên timeline
 function convertDateStringToOffsetMinutes(dateStr, dateHeaders, isEnd = false, shiftLength = 540){
   if(!dateStr) return null;
@@ -4847,12 +4872,12 @@ function renderKHSXDong(){
       </select>
     </td>`;
     html += `<td style="padding:2px 4px;border:1px solid var(--line);${fzBg}">
-      <input class="khsxStartInput" data-part="${pEsc}" type="text" value="${String(r.startDate||'').replace(/"/g,'&quot;')}" placeholder="-" title="Sửa Bắt đầu (vd 09-Nov) — ghi vào Excel gốc"
-        style="width:62px;text-align:center;color:#3b82f6;font-size:11px;background:var(--panel-2);border:1px solid var(--line);border-radius:4px;padding:2px 3px">
+      <input class="khsxStartInput" data-part="${pEsc}" type="date" value="${khsxDateToISO(r.startDate)}" title="Bấm để chọn ngày Bắt đầu trên lịch — ghi vào Excel gốc"
+        style="width:118px;color:#3b82f6;font-size:11px;background:var(--panel-2);border:1px solid var(--line);border-radius:4px;padding:2px 3px">
     </td>`;
     html += `<td style="padding:2px 4px;border:1px solid var(--line);${fzBg}">
-      <input class="khsxDueInput" data-part="${pEsc}" type="text" value="${String(r.dueDate||'').replace(/"/g,'&quot;')}" placeholder="-" title="Sửa Hạn giao (vd 15-Nov) — ghi vào Excel gốc"
-        style="width:62px;text-align:center;color:${dueColor};font-weight:${r.isLate?'700':'400'};font-size:11px;background:var(--panel-2);border:1px solid var(--line);border-radius:4px;padding:2px 3px">
+      <input class="khsxDueInput" data-part="${pEsc}" type="date" value="${khsxDateToISO(r.dueDate)}" title="Bấm để chọn ngày Hạn giao trên lịch — ghi vào Excel gốc"
+        style="width:118px;color:${dueColor};font-weight:${r.isLate?'700':'400'};font-size:11px;background:var(--panel-2);border:1px solid var(--line);border-radius:4px;padding:2px 3px">
     </td>`;
     
     data.dateLabels.forEach(d => {
@@ -7273,9 +7298,9 @@ if(khsxWrapEl) khsxWrapEl.addEventListener("change", (e) => {
   const pr = e.target.closest(".khsxPriInput");
   if(pr){ onEditKHSXField(pr.dataset.part, "priority", pr.value); return; }
   const st = e.target.closest(".khsxStartInput");
-  if(st){ onEditKHSXField(st.dataset.part, "start", st.value); return; }
+  if(st){ onEditKHSXField(st.dataset.part, "start", isoToKhsxDate(st.value)); return; }
   const du = e.target.closest(".khsxDueInput");
-  if(du){ onEditKHSXField(du.dataset.part, "due", du.value); return; }
+  if(du){ onEditKHSXField(du.dataset.part, "due", isoToKhsxDate(du.value)); return; }
 });
 
 // Bộ lọc & Tìm kiếm KHSX_Dong

@@ -172,5 +172,9 @@ footer{flex:0 0 auto;padding:7px 14px;color:var(--faint);font-size:11px;text-ali
 #pane-khsxDong.khsx-fs #khsxDongTableWrap{ max-height:calc(100vh - 150px); overflow:auto; }
 /* Chế độ thường: giới hạn chiều cao khung bảng để thanh cuộn ngang luôn trong tầm nhìn */
 #khsxDongTableWrap{ max-height:calc(100vh - 290px); min-height:300px; overflow:auto; }
+/* Ô chọn ngày Bắt đầu/Hạn giao: lịch gốc trình duyệt hợp theme sáng/tối */
+.khsxStartInput, .khsxDueInput{ color-scheme: light dark; }
+:root[data-theme="dark"]  .khsxStartInput, :root[data-theme="dark"]  .khsxDueInput{ color-scheme: dark; }
+:root[data-theme="light"] .khsxStartInput, :root[data-theme="light"] .khsxDueInput{ color-scheme: light; }
 #pane-khsxDong:fullscreen{ background:var(--panel); }
 #pane-khsxDong:-webkit-full-screen{ background:var(--panel); }
